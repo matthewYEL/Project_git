@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <?scdStore version="2"?><scannerInfo id="org.eclipse.cdt.make.core.discoveredScannerInfo">
-                            
+                                
+    
     
     
     
     
     
     <instance id="cdt.managedbuild.toolchain.gnu.base.677096465;cdt.managedbuild.toolchain.gnu.base.677096465.660980563;cdt.managedbuild.tool.gnu.c.compiler.base.609031077;cdt.managedbuild.tool.gnu.c.compiler.input.480854066">
-                                                        
+                                                                
+        
         
         
         
@@ -512,14 +514,16 @@
             <definedSymbol symbol="__USING_POSIXTHREAD__=1"/>
             <definedSymbol symbol="_REENTRANT=1"/>
         </collector>
-                                                    
+                                                            
+    
     
     
     
     
     
     </instance>
-                        
+                            
+
 
 
 

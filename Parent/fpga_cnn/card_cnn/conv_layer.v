@@ -24,8 +24,9 @@
 //      zero padding does -- get this wrong and every border pixel is skewed.
 //
 // THROUGHPUT: one tap per cycle in steady state.
-//   conv1: 8*48*48*1*25  =   460,800 cycles  ~9.2 ms @ 50 MHz
-//   conv2: 16*24*24*8*25 = 1,843,200 cycles ~36.9 ms @ 50 MHz
+//   conv1: 8*96*96*1*25  = 1,843,200 cycles  ~36.9 ms @ 50 MHz
+//   conv2: 16*48*48*8*25 = 7,372,800 cycles ~147.5 ms @ 50 MHz
+//   conv3: 16*24*24*16*25 = 3,686,400 cycles ~73.7 ms @ 50 MHz
 // If that is too slow, the natural next step is to bank the activation RAM
 // by kernel row and process 5 taps per cycle (5 DSPs instead of 1), cutting
 // both figures by 5x. Not done here -- correctness first.
@@ -39,6 +40,10 @@ module conv_layer #(
     parameter PAD     = 2,          // zero padding
     parameter IN_AW   = 12,         // input activation address width
     parameter OUT_AW  = 15,         // output activation address width
+    // Fold the following 2x2 max pool into this layer, so the output written
+    // is DIM/2 x DIM/2 per channel instead of DIM x DIM. See the note above
+    // the pool logic below -- at 96x96 the unpooled conv1 map does not fit.
+    parameter FUSE_POOL = 1,
     parameter WFILE   = "conv1_w.hex",
     parameter BFILE   = "conv1_b.hex",
     // Fixed-point format: FRAC_BITS fractional bits in a 16-bit signed word.
@@ -126,6 +131,30 @@ module conv_layer #(
     // explicit 16x16 product so the DSP block gets a 32-bit multiply, not a 40-bit one
     wire signed [31:0] prod     = $signed(in_rd_data) * $signed(w_d2);
 
+    // ---- fused 2x2 max pool ------------------------------------------------
+    // With FUSE_POOL the layer writes pooled output directly rather than
+    // materialising the full DIM x DIM map for a separate maxpool_layer to
+    // read back. That buffer is the largest thing in the design at 96x96:
+    // conv1's unpooled output is 8*96*96 = 73,728 words = 144 M10K blocks,
+    // against 553 on the whole device. Pooled, it is 18,432 words = 36 blocks.
+    //
+    // S_WRITE emits pixels in raster order within a channel (ox, then oy, then
+    // f), so one DIM/2-word row of running maxima is all the state needed: on
+    // an even row each horizontal pair's max is parked in rowmax[]; on an odd
+    // row it is maxed against rowmax[] and written out. ReLU has already been
+    // applied to both, and max(relu(a), relu(b)) == relu(max(a, b)), so this is
+    // bit-identical to what the separate maxpool_layer produced.
+    //
+    // DIM must be even. Both pooled dimensions are floor(DIM/2) otherwise, and
+    // the trailing row/column would be silently dropped.
+    localparam DIM_OUT   = DIM / 2;
+    localparam PLANE_OUT = DIM_OUT * DIM_OUT;
+
+    reg  signed [15:0] rowmax [0:DIM_OUT-1];
+    reg  signed [15:0] pair;
+    wire signed [15:0] pmax = (sat_val > pair)            ? sat_val : pair;
+    wire signed [15:0] vmax = (pmax > rowmax[ox[7:1]])    ? pmax    : rowmax[ox[7:1]];
+
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             state <= S_IDLE; done <= 1'b0; out_wr_en <= 1'b0;
@@ -187,9 +216,24 @@ module conv_layer #(
                 end
 
                 S_WRITE: begin
-                    out_wr_addr <= f*PLANE + oy*DIM + ox;
-                    out_wr_data <= sat_val;
-                    out_wr_en   <= 1'b1;
+                    if (FUSE_POOL) begin
+                        // even column: park the pixel. odd column: reduce the
+                        // horizontal pair, then either stash it (even row) or
+                        // combine it with the stashed row and emit (odd row).
+                        if (!ox[0])
+                            pair <= sat_val;
+                        else if (!oy[0])
+                            rowmax[ox[7:1]] <= pmax;
+                        else begin
+                            out_wr_addr <= f*PLANE_OUT + oy[7:1]*DIM_OUT + ox[7:1];
+                            out_wr_data <= vmax;
+                            out_wr_en   <= 1'b1;
+                        end
+                    end else begin
+                        out_wr_addr <= f*PLANE + oy*DIM + ox;
+                        out_wr_data <= sat_val;
+                        out_wr_en   <= 1'b1;
+                    end
 
                     if (ox == DIM-1) begin
                         ox <= 0;

@@ -7,9 +7,9 @@
  * the Cortex-A9 MPCore as two pthreads with hard CPU affinity:
  *
  *   CPU0  vision thread   /dev/mem -> LW bridge: trigger the camera, read the
- *                         48x48 snapshot, scale to Q6.10, upload it, start the
+ *                         96x96 snapshot, scale to Q6.10, upload it, start the
  *                         CNN, poll for the result, decode rank/suit/joker.
- *                         I/O bound -- ~4600 uncached bridge accesses a frame.
+ *                         I/O bound -- ~64,500 uncached bridge accesses a frame.
  *
  *   CPU1  game thread     Blackjack state machine over the recognised cards,
  *                         plus a Monte-Carlo odds engine that re-estimates the
@@ -362,7 +362,7 @@ static unsigned fake_result(unsigned frame, unsigned *red_count, unsigned *maxv)
     unsigned step = frame % cycle;
     unsigned r;
 
-    usleep(120000);                                  /* ~8 frames a second */
+    usleep(300000);                                  /* ~3 frames a second, as 96x96 inference runs */
 
     if (step == hold) {                              /* blank frame */
         *maxv = 0;
@@ -370,8 +370,10 @@ static unsigned fake_result(unsigned frame, unsigned *red_count, unsigned *maxv)
         return (1u << 7);
     }
 
-    *maxv = 5000;
-    *red_count = (deal[idx].suit >= 2) ? 9000u : 800u;
+    /* Plausible at the 96x96 scale: cell sums top out at SUM_MAX 510, and the
+     * red count is over an 18,432-pixel crop against RED_THRESH_SW 1600. */
+    *maxv = 480;
+    *red_count = (deal[idx].suit >= 2) ? 3000u : 250u;
 
     r  = (unsigned)deal[idx].rank & 0xFu;
     r |= ((unsigned)deal[idx].suit & 0x3u) << 4;
@@ -836,7 +838,7 @@ int main(int argc, char **argv)
     ring_init(&g_ring);
 
     printf("\ntask allocation:\n"
-           "  CPU%d  vision  camera trigger, 48x48 snapshot read, Q6.10 scale,\n"
+           "  CPU%d  vision  camera trigger, 96x96 snapshot read, Q6.10 scale,\n"
            "                CNN upload/start/poll, rank+suit decode\n"
            "  CPU%d  game    blackjack state machine, Monte-Carlo odds\n"
            "                (%d trials per committed card)\n\n",

@@ -1,0 +1,5 @@
+config_db_path=C%3A\\Program Files\\Arm\\Development Studio 2026.0-1\\sw\\debugger\\configdb;
+config_db_path0_pullfreq=On Launch
+config_db_path_default=C%3A\\Program Files\\Arm\\Development Studio 2026.0-1\\sw\\debugger\\configdb;
+eclipse.preferences.version=1
+enabled_config_db_path=C%3A\\Program Files\\Arm\\Development Studio 2026.0-1\\sw\\debugger\\configdb;

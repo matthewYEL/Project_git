@@ -2,7 +2,7 @@
  * The FreeRTOS application: the card pipeline as three tasks on CPU0, with the
  * preprocessing stage handed to CPU1.
  *
- *   prio 3  Capture   trigger the camera, read the 2304 raw cells, hand the
+ *   prio 3  Capture   trigger the camera, read the raw cells, hand the
  *                     frame to CPU1. Highest priority because the camera is
  *                     the only part with a real deadline -- miss a frame and
  *                     it is gone.

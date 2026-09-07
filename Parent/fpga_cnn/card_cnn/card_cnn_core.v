@@ -1,14 +1,23 @@
 // ---------------------------------------------------------------------------
 // card_cnn_core.v  --  top-level card recognition CNN
 //
-//   image 48x48            2,304 words   (written by HPS or camera snapshot)
-//     -> conv1  8 filt 5x5 pad2  -> ReLU -> 8 x 48x48   18,432
-//     -> pool1  2x2              ->          8 x 24x24    4,608
-//     -> conv2 16 filt 5x5 pad2  -> ReLU -> 16 x 24x24    9,216
-//     -> pool2  2x2              ->         16 x 12x12    2,304
+//   image 96x96            9,216 words   (written by HPS or camera snapshot)
+//     -> conv1  8 filt 5x5 pad2  -> ReLU -> pool 2x2 ->  8 x 48x48  18,432
+//     -> conv2 16 filt 5x5 pad2  -> ReLU -> pool 2x2 -> 16 x 24x24   9,216
+//     -> conv3 16 filt 5x5 pad2  -> ReLU -> pool 2x2 -> 16 x 12x12   2,304
 //     -> fc_shared 2305->64 ReLU  (2304 features + colour flag)
 //     -> fc_rank 13 / fc_suit 4 / fc_joker 2
 //     -> argmax, with the suit argmax CONSTRAINED BY COLOUR
+//
+// Three conv stages, not two, so that three pools bring 96x96 down to the same
+// 12x12 the 48x48 model reached in two -- fc_shared therefore stays 2305->64.
+// With two stages the flattened vector would be 16x24x24 = 9,216 and fc_shared
+// would need 590K weights, which does not fit.
+//
+// Each conv writes POOLED output directly (conv_layer's FUSE_POOL). The
+// separate maxpool_layer is no longer instantiated: materialising conv1's
+// unpooled 8 x 96x96 map would cost 144 M10K blocks on its own. maxpool_layer.v
+// stays in the project regardless -- ram_dp is defined at the bottom of it.
 //
 // The layers run in sequence, each triggered by the previous one's done
 // pulse -- the same chaining LAB 5 uses in cnn_core.v.
@@ -29,7 +38,7 @@ module card_cnn_core (
 
     // image write port (HPS or camera snapshot)
     input  wire         img_wr_en,
-    input  wire [11:0]  img_wr_addr,
+    input  wire [13:0]  img_wr_addr,
     input  wire signed [15:0] img_wr_data,
 
     // colour flag: 1 = red, 0 = black
@@ -42,36 +51,32 @@ module card_cnn_core (
     output reg          done
 );
     // ---- activation buffers ----------------------------------------------
-    wire [11:0] img_rd_addr;   wire signed [15:0] img_rd_data;
-    // DEPTH = exact activation size (48*48, 8*48*48, 8*24*24, 16*24*24, 16*12*12);
-    // the default 2^AW depth would cost ~55 extra M10K blocks.
-    ram_dp #(.AW(12), .DEPTH(2304)) u_img (
+    wire [13:0] img_rd_addr;   wire signed [15:0] img_rd_data;
+    // DEPTH = exact activation size (96*96, 8*48*48, 16*24*24, 16*12*12); the
+    // default 2^AW depth would cost ~55 extra M10K blocks. There is no separate
+    // conv-output buffer any more -- each conv pools as it writes, so only the
+    // pooled maps are stored.
+    ram_dp #(.AW(14), .DEPTH(9216)) u_img (
         .clk(clk), .wr_en(img_wr_en), .wr_addr(img_wr_addr), .wr_data(img_wr_data),
         .rd_addr(img_rd_addr), .rd_data(img_rd_data));
 
-    wire        c1_wr_en;  wire [14:0] c1_wr_addr; wire signed [15:0] c1_wr_data;
-    wire [14:0] c1_rd_addr; wire signed [15:0] c1_rd_data;
-    ram_dp #(.AW(15), .DEPTH(18432)) u_c1 (
-        .clk(clk), .wr_en(c1_wr_en), .wr_addr(c1_wr_addr), .wr_data(c1_wr_data),
-        .rd_addr(c1_rd_addr), .rd_data(c1_rd_data));
-
-    wire        p1_wr_en;  wire [12:0] p1_wr_addr; wire signed [15:0] p1_wr_data;
-    wire [12:0] p1_rd_addr; wire signed [15:0] p1_rd_data;
-    ram_dp #(.AW(13), .DEPTH(4608)) u_p1 (
+    wire        p1_wr_en;  wire [14:0] p1_wr_addr; wire signed [15:0] p1_wr_data;
+    wire [14:0] p1_rd_addr; wire signed [15:0] p1_rd_data;
+    ram_dp #(.AW(15), .DEPTH(18432)) u_p1 (
         .clk(clk), .wr_en(p1_wr_en), .wr_addr(p1_wr_addr), .wr_data(p1_wr_data),
         .rd_addr(p1_rd_addr), .rd_data(p1_rd_data));
 
-    wire        c2_wr_en;  wire [13:0] c2_wr_addr; wire signed [15:0] c2_wr_data;
-    wire [13:0] c2_rd_addr; wire signed [15:0] c2_rd_data;
-    ram_dp #(.AW(14), .DEPTH(9216)) u_c2 (
-        .clk(clk), .wr_en(c2_wr_en), .wr_addr(c2_wr_addr), .wr_data(c2_wr_data),
-        .rd_addr(c2_rd_addr), .rd_data(c2_rd_data));
-
-    wire        p2_wr_en;  wire [11:0] p2_wr_addr; wire signed [15:0] p2_wr_data;
-    wire [11:0] p2_rd_addr; wire signed [15:0] p2_rd_data;
-    ram_dp #(.AW(12), .DEPTH(2304)) u_p2 (
+    wire        p2_wr_en;  wire [13:0] p2_wr_addr; wire signed [15:0] p2_wr_data;
+    wire [13:0] p2_rd_addr; wire signed [15:0] p2_rd_data;
+    ram_dp #(.AW(14), .DEPTH(9216)) u_p2 (
         .clk(clk), .wr_en(p2_wr_en), .wr_addr(p2_wr_addr), .wr_data(p2_wr_data),
         .rd_addr(p2_rd_addr), .rd_data(p2_rd_data));
+
+    wire        p3_wr_en;  wire [11:0] p3_wr_addr; wire signed [15:0] p3_wr_data;
+    wire [11:0] p3_rd_addr; wire signed [15:0] p3_rd_data;
+    ram_dp #(.AW(12), .DEPTH(2304)) u_p3 (
+        .clk(clk), .wr_en(p3_wr_en), .wr_addr(p3_wr_addr), .wr_data(p3_wr_data),
+        .rd_addr(p3_rd_addr), .rd_data(p3_rd_data));
 
     wire        sh_wr_en;  wire [5:0]  sh_wr_addr; wire signed [15:0] sh_wr_data;
     wire [5:0]  sh_rd_addr; wire signed [15:0] sh_rd_data;
@@ -87,40 +92,37 @@ module card_cnn_core (
         .rd_addr(hd_rd_addr), .rd_data(hd_rd_data));
 
     // ---- layer sequencing -------------------------------------------------
-    wire c1_done, p1_done, c2_done, p2_done, sh_done;
+    // Each conv includes its pool, so the chain is three stages, not six.
+    wire p1_done, p2_done, p3_done, sh_done;
     wire rk_done, st_done, jk_done;
     reg  start_c1;
 
-    conv_layer #(.IN_CH(1), .OUT_CH(8), .DIM(48), .IN_AW(12), .OUT_AW(15),
+    conv_layer #(.IN_CH(1), .OUT_CH(8), .DIM(96), .IN_AW(14), .OUT_AW(15),
                  .WFILE("conv1_w.hex"), .BFILE("conv1_b.hex"))
-    u_conv1 (.clk(clk), .rst(rst), .start(start_c1), .done(c1_done),
+    u_conv1 (.clk(clk), .rst(rst), .start(start_c1), .done(p1_done),
              .in_rd_addr(img_rd_addr), .in_rd_data(img_rd_data),
-             .out_wr_addr(c1_wr_addr), .out_wr_data(c1_wr_data), .out_wr_en(c1_wr_en));
-
-    maxpool_layer #(.CH(8), .DIM_IN(48), .IN_AW(15), .OUT_AW(13))
-    u_pool1 (.clk(clk), .rst(rst), .start(c1_done), .done(p1_done),
-             .in_rd_addr(c1_rd_addr), .in_rd_data(c1_rd_data),
              .out_wr_addr(p1_wr_addr), .out_wr_data(p1_wr_data), .out_wr_en(p1_wr_en));
 
-    conv_layer #(.IN_CH(8), .OUT_CH(16), .DIM(24), .IN_AW(13), .OUT_AW(14),
+    conv_layer #(.IN_CH(8), .OUT_CH(16), .DIM(48), .IN_AW(15), .OUT_AW(14),
                  .WFILE("conv2_w.hex"), .BFILE("conv2_b.hex"))
-    u_conv2 (.clk(clk), .rst(rst), .start(p1_done), .done(c2_done),
+    u_conv2 (.clk(clk), .rst(rst), .start(p1_done), .done(p2_done),
              .in_rd_addr(p1_rd_addr), .in_rd_data(p1_rd_data),
-             .out_wr_addr(c2_wr_addr), .out_wr_data(c2_wr_data), .out_wr_en(c2_wr_en));
-
-    maxpool_layer #(.CH(16), .DIM_IN(24), .IN_AW(14), .OUT_AW(12))
-    u_pool2 (.clk(clk), .rst(rst), .start(c2_done), .done(p2_done),
-             .in_rd_addr(c2_rd_addr), .in_rd_data(c2_rd_data),
              .out_wr_addr(p2_wr_addr), .out_wr_data(p2_wr_data), .out_wr_en(p2_wr_en));
+
+    conv_layer #(.IN_CH(16), .OUT_CH(16), .DIM(24), .IN_AW(14), .OUT_AW(12),
+                 .WFILE("conv3_w.hex"), .BFILE("conv3_b.hex"))
+    u_conv3 (.clk(clk), .rst(rst), .start(p2_done), .done(p3_done),
+             .in_rd_addr(p2_rd_addr), .in_rd_data(p2_rd_data),
+             .out_wr_addr(p3_wr_addr), .out_wr_data(p3_wr_data), .out_wr_en(p3_wr_en));
 
     // 1.0 in Q6.10. Must track FRAC_BITS in the layer modules.
     wire signed [15:0] colour_val = colour_flag ? 16'sd1024 : 16'sd0;
 
     fc_layer #(.N_IN(2305), .N_OUT(64), .USE_RELU(1), .APPEND_COLOUR(1),
                .IN_AW(12), .OUT_AW(6), .WFILE("fcs_w.hex"), .BFILE("fcs_b.hex"))
-    u_fcs (.clk(clk), .rst(rst), .start(p2_done), .done(sh_done),
+    u_fcs (.clk(clk), .rst(rst), .start(p3_done), .done(sh_done),
            .colour_val(colour_val),
-           .in_rd_addr(p2_rd_addr), .in_rd_data(p2_rd_data),
+           .in_rd_addr(p3_rd_addr), .in_rd_data(p3_rd_data),
            .out_wr_addr(sh_wr_addr), .out_wr_data(sh_wr_data), .out_wr_en(sh_wr_en));
 
     // The three heads share the 64-wide hidden layer. They run sequentially

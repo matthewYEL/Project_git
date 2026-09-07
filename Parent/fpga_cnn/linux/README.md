@@ -6,20 +6,20 @@ CPU-pinned pthreads.
 
 ```
                  FPGA fabric                    HPS, Linux SMP
-  D8M ──▶ frame buf ──▶ crop/48x48 ──▶ 3-head CNN
+  D8M ──▶ frame buf ──▶ crop/96x96 ──▶ 3-head CNN
                                           │
                              LW bridge 0xFF200000 (/dev/mem)
                                           │
                         ┌─────────────────┴──────────────────┐
                         │                                    │
              CPU0  vision thread                   CPU1  game thread
-             trigger, read 2304 cells,             blackjack state machine,
+             trigger, read 9216 cells,             blackjack state machine,
              scale to Q6.10, upload,               Monte-Carlo odds engine
              start CNN, poll, decode               (200k trials per card)
                         └────────── ring buffer ─────────────┘
 ```
 
-Why this split: the vision thread is I/O bound — about 4,600 uncached bridge
+Why this split: the vision thread is I/O bound — about 64,500 uncached bridge
 accesses per frame — while the odds engine is pure compute. Putting them on
 separate cores means the camera keeps running at full rate while the odds are
 being computed, instead of the two taking turns.
@@ -142,7 +142,7 @@ mapped LW bridge 0xFF200000 (4096 bytes)
 camera: mipi_cfg=1 cam_cfg=1 vs=417 pixclk=63488 retries=0 (audpll=1 hdmi=1)
 
 task allocation:
-  CPU0  vision  camera trigger, 48x48 snapshot read, Q6.10 scale, ...
+  CPU0  vision  camera trigger, 96x96 snapshot read, Q6.10 scale, ...
   CPU1  game    blackjack state machine, Monte-Carlo odds ...
 
 [vision] running on CPU0 -- camera + CNN accelerator
@@ -249,7 +249,7 @@ make check
 ```
 
 builds `preprocess_check` and replays a **real board capture** (`capture.txt`,
-via `testdata/`) through this app's fixed-point front end, requiring all 2304
+via `testdata/`) through this app's fixed-point front end, requiring all 9216
 Q6.10 pixels to match what `sim_card_cnn.py` computes. It fails loudly if
 `ZOOM_*` or the scaling is changed on one side only — which is exactly the
 class of bug that produces a confidently wrong card.

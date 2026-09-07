@@ -26,15 +26,15 @@ module camera_capture (
     output wire [4:0]  dbg_lut_index,
     output wire        dbg_ack, dbg_ready_latched, dbg_hdmi_int,
 
-    // 给HPS读取snapshot数据 (48x48 = 2304 words; addr 2304 = red_count, 2305 = colour flag)
-    // 2306 = vs_count, 2307 = pixclk_ticks, 2308 = retry_count,
-    // 2309 = config STEP,
-    // 2310 = {hdmi_ready, audio_pll_ok, camera_release, mipi_release},
-    // 2311 = wde_ticks (frame-buffer write-enable activity)
+    // 给HPS读取snapshot数据 (96x96 = 9216 words; addr 9216 = red_count, 9217 = colour flag)
+    // 9218 = vs_count, 9219 = pixclk_ticks, 9220 = retry_count,
+    // 9221 = config STEP,
+    // 9222 = {hdmi_ready, audio_pll_ok, camera_release, mipi_release},
+    // 9223 = wde_ticks (frame-buffer write-enable activity)
     //        NB pll_ok is the AUDIO PLL (it feeds HDMI_TX_AD7513), not the video
     //        one -- VIDEO_PLL has no locked port wired, but VGA_CLK comes from it
     //        so a completing snapshot already proves it is locked.
-    input  wire [11:0] hps_rd_addr,
+    input  wire [13:0] hps_rd_addr,
     output wire [15:0] hps_rd_data,
     output wire        snapshot_done,
     output wire        snapshot_colour    // 1 = red card (hardware detector), latched with the snapshot
@@ -63,12 +63,16 @@ module camera_capture (
     always @(posedge VGA_CLK) win_sr <= {win_sr[2:0], disp_win};
     wire disp_win_d = win_sr[3];
 
-    // 1-px green frame around the CNN crop (screen x 200..439, y 120..359).
-    // The model classifies the card's rank/suit index corner, so aim that corner
-    // into the box. Delayed by the same 4 clocks so it lines up with the image.
+    // 1-px green frame around the CNN crop (screen x 272..367, y 144..335).
+    // The crop is 96 x 192 buffer pixels now, not 240 x 240: downsample_96x96
+    // carries the model's 0.5 aspect in hardware, so the box is a tall
+    // rectangle and the host no longer trims it. The model classifies the
+    // card's rank/suit index corner, so aim that corner into the box -- it
+    // should fill the box top to bottom. Delayed by the same 4 clocks so it
+    // lines up with the image.
     wire crop_edge = disp_win && (
-        ((cur_x == 11'd200 || cur_x == 11'd439) && (cur_y >= 11'd120) && (cur_y < 11'd360)) ||
-        ((cur_y == 11'd120 || cur_y == 11'd359) && (cur_x >= 11'd200) && (cur_x < 11'd440)));
+        ((cur_x == 11'd272 || cur_x == 11'd367) && (cur_y >= 11'd144) && (cur_y < 11'd336)) ||
+        ((cur_y == 11'd144 || cur_y == 11'd335) && (cur_x >= 11'd272) && (cur_x < 11'd368)));
     reg  [3:0] edge_sr;
     always @(posedge VGA_CLK) edge_sr <= {edge_sr[2:0], crop_edge};
     wire crop_edge_d = edge_sr[3];
@@ -150,9 +154,9 @@ module camera_capture (
     always @(posedge VGA_CLK) trig_sync <= {trig_sync[1:0], capture_trigger_in};
     wire capture_trigger_vga = trig_sync[1] & ~trig_sync[2];
 
-    // 48x48 box-sum downsampler + snapshot RAM + red/black detector.
+    // 96x96 box-sum downsampler + snapshot RAM + red/black detector.
     // The HPS read port runs on clk50 so the PIO path is single-domain.
-    downsample_48x48 u_ds (
+    downsample_96x96 u_ds (
         .vga_clk(VGA_CLK), .vga_vs(VGA_VS), .win(disp_win),
         .red(RED), .green(GREEN), .blue(BLUE),
         .capture_trigger(capture_trigger_vga),
@@ -239,20 +243,20 @@ module camera_capture (
 
     assign cfg_reset_n = RESET_N_DELAY & ~retry_pulse;
 
-    // downsample_48x48 registers rd_addr internally, so its data is valid one
+    // downsample_96x96 registers rd_addr internally, so its data is valid one
     // clk50 cycle after the address. Match that delay here or the diagnostic
     // words land one read early.
-    reg [11:0] rd_addr_d;
+    reg [13:0] rd_addr_d;
     always @(posedge clk50) rd_addr_d <= hps_rd_addr;
 
     assign hps_rd_data =
-        (rd_addr_d == 12'd2306) ? vs_count :
-        (rd_addr_d == 12'd2307) ? pixclk_ticks :
-        (rd_addr_d == 12'd2308) ? retry_count :
-        (rd_addr_d == 12'd2309) ? {6'b0, cfg_step} :
-        (rd_addr_d == 12'd2310) ? {12'b0, HDMI_READY, PLL_TEST_OK,
+        (rd_addr_d == 14'd9218) ? vs_count :
+        (rd_addr_d == 14'd9219) ? pixclk_ticks :
+        (rd_addr_d == 14'd9220) ? retry_count :
+        (rd_addr_d == 14'd9221) ? {6'b0, cfg_step} :
+        (rd_addr_d == 14'd9222) ? {12'b0, HDMI_READY, PLL_TEST_OK,
                                    CAMERA_MIPI_RELAESE, MIPI_BRIDGE_RELEASE} :
-        (rd_addr_d == 12'd2311) ? wde_ticks :
+        (rd_addr_d == 14'd9223) ? wde_ticks :
                                   ds_rd_data;
 
 endmodule

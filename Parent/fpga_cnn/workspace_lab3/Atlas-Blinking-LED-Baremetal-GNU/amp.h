@@ -28,8 +28,13 @@
  * cannot take operands; AMP_STACK_TOP_STR keeps the two spellings tied
  * together.
  */
+/* The window has to hold AMP_SLOTS frame slots plus 32 KB of CPU1 stack below
+ * the top -- see the amp_shared_fits assertion in amp.c. At 96x96 a slot is
+ * 36,896 bytes (raw + q + head), so two slots need 73,824 and the 96 KB window
+ * the 48x48 build used no longer fits. 192 KB, of which the assertion lets the
+ * block use 160 KB. */
 #define AMP_SHARED_BASE     0x03000000
-#define AMP_CORE1_STACK_TOP 0x03018000
+#define AMP_CORE1_STACK_TOP 0x03030000
 
 #define AMP_SLOTS           2
 #define AMP_MAGIC           0x414D5031UL   /* "AMP1" */

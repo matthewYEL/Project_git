@@ -6,16 +6,19 @@
  * implementation of that pipeline, so it has to join the agreement rather than
  * be assumed to.
  *
- * testdata/ was produced from capture.txt -- a real Arm DS console dump from
- * the board -- by sim_card_cnn.py's own parser and crop:
- *   capture_raw.txt  the 48x48 raw cell sums the board read
- *                    (the PGM carries raw*255/6375 and 6375/255 == 25 exactly,
- *                    so raw == pgm*25 is a lossless reconstruction)
- *   capture_q.txt    the Q6.10 values the simulator uploads for that capture,
- *                    zoom window (9,0,29,48)
+ * testdata/ derives from capture.txt -- a real Arm DS console dump from the
+ * board -- via sim_card_cnn.py's own parser:
+ *   capture_raw.txt  96x96 raw cell sums. RESAMPLED, not captured: the dump is
+ *                    from the 48x48 build, so its 25-pixel cell sums were
+ *                    reduced to per-pixel luminance (raw/25, exact) and
+ *                    re-expanded nearest-neighbour into 1x2 cells (2*luminance,
+ *                    0..510). Real board values, synthetic geometry. Replace it
+ *                    with a genuine 96x96 dump once the new bitstream runs.
+ *   capture_q.txt    the Q6.10 values the model produces for that raw, at the
+ *                    shipped identity zoom window (0,0,96,96)
  *
  * This runs ccp_preprocess() over capture_raw.txt and requires every one of
- * the 2304 outputs to match capture_q.txt exactly. A mismatch means the C and
+ * all IMG_PIXELS outputs to match capture_q.txt exactly. A mismatch means the C and
  * the model have drifted -- most likely someone changed ZOOM_* on one side
  * only, which is exactly the failure this is here to catch.
  *

@@ -1,0 +1,45 @@
+!SESSION 2026-09-07 23:17:32.466 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.1
+java.vendor=Microsoft
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en_MY
+Command-line arguments:  -os win32 -ws win32 -arch x86_64 -data C:\Users\mattb\Downloads\LAB_5_cnn_96\LAB_5\fpga_cnn\workspace_lab3\Atlas-Blinking-LED-Baremetal-GNU
+
+!ENTRY org.python.pydev.shared_core 1 1 2026-09-07 23:17:49.003
+!MESSAGE Restoring info for: C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.tpip.jython_2.7.4.16\lib\jython-standalone-2.7.4.jar
+!STACK 0
+java.lang.RuntimeException: Restoring info for: C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.tpip.jython_2.7.4.16\lib\jython-standalone-2.7.4.jar
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.getInterpretersFromPersistedString(AbstractInterpreterManager.java:461)
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.internalRecreateCacheGetInterpreterInfos(AbstractInterpreterManager.java:287)
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.setInfos(AbstractInterpreterManager.java:584)
+	at com.arm.pydev.StartupListener.updateConfig(StartupListener.java:223)
+	at com.arm.pydev.StartupListener.earlyStartup(StartupListener.java:82)
+	at org.eclipse.ui.internal.EarlyStartupRunnable.runEarlyStartup(EarlyStartupRunnable.java:79)
+	at org.eclipse.ui.internal.EarlyStartupRunnable.run(EarlyStartupRunnable.java:55)
+	at org.eclipse.core.runtime.SafeRunner.run(SafeRunner.java:47)
+	at org.eclipse.ui.internal.Workbench$39.run(Workbench.java:2793)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+Caused by: java.io.IOException: Expecting: C:\Users\mattb\Downloads\LAB_5_cnn_96\LAB_5\fpga_cnn\workspace_lab3\Atlas-Blinking-LED-Baremetal-GNU\.metadata\.plugins\org.python.pydev\v1_br0rutd78ntv4p5aim2xxrzr3\modulesKeys to exist (and be a file).
+	at org.python.pydev.ast.codecompletion.revisited.ModulesManager.loadFromFile(ModulesManager.java:330)
+	at org.python.pydev.ast.codecompletion.revisited.SystemModulesManager.load(SystemModulesManager.java:443)
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.getInterpretersFromPersistedString(AbstractInterpreterManager.java:459)
+	... 9 more
+
+!ENTRY org.python.pydev.shared_core 1 1 2026-09-07 23:17:49.173
+!MESSAGE Finished restoring information for: C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.tpip.jython_2.7.4.16\lib\jython-standalone-2.7.4.jar at: C:\Users\mattb\Downloads\LAB_5_cnn_96\LAB_5\fpga_cnn\workspace_lab3\Atlas-Blinking-LED-Baremetal-GNU\.metadata\.plugins\org.python.pydev\v1_br0rutd78ntv4p5aim2xxrzr3
+!STACK 0
+java.lang.RuntimeException: Finished restoring information for: C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.tpip.jython_2.7.4.16\lib\jython-standalone-2.7.4.jar at: C:\Users\mattb\Downloads\LAB_5_cnn_96\LAB_5\fpga_cnn\workspace_lab3\Atlas-Blinking-LED-Baremetal-GNU\.metadata\.plugins\org.python.pydev\v1_br0rutd78ntv4p5aim2xxrzr3
+	at org.python.pydev.core.log.Log.logInfo(Log.java:45)
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.getInterpretersFromPersistedString(AbstractInterpreterManager.java:506)
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.internalRecreateCacheGetInterpreterInfos(AbstractInterpreterManager.java:287)
+	at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.setInfos(AbstractInterpreterManager.java:584)
+	at com.arm.pydev.StartupListener.updateConfig(StartupListener.java:223)
+	at com.arm.pydev.StartupListener.earlyStartup(StartupListener.java:82)
+	at org.eclipse.ui.internal.EarlyStartupRunnable.runEarlyStartup(EarlyStartupRunnable.java:79)
+	at org.eclipse.ui.internal.EarlyStartupRunnable.run(EarlyStartupRunnable.java:55)
+	at org.eclipse.core.runtime.SafeRunner.run(SafeRunner.java:47)
+	at org.eclipse.ui.internal.Workbench$39.run(Workbench.java:2793)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+
+!ENTRY org.python.pydev.shared_core 4 4 2026-09-07 23:17:49.297
+!MESSAGE Info: Rebuilding internal caches: C:\Users\mattb\Downloads\LAB_5_cnn_96\LAB_5\fpga_cnn\workspace_lab3\Atlas-Blinking-LED-Baremetal-GNU\.metadata\.plugins\com.python.pydev.analysis\jython_v1_br0rutd78ntv4p5aim2xxrzr3\jython.pydevsysteminfo (Expected error to be provided and got no error!)

@@ -22,21 +22,25 @@
 
 #define REG_IMG_WR_CTRL      0x00   /* [0] wr_en, [2] colour override en, [3] colour value */
 #define REG_IMG_WR_DATA      0x10   /* Q6.10 pixel */
-#define REG_IMG_WR_ADDR      0x20   /* 0..2303 = y*48 + x */
+#define REG_IMG_WR_ADDR      0x20   /* 0..9215 = y*96 + x */
 #define REG_CAMERA_TRIGGER   0x30
 #define REG_SNAPSHOT_DATA    0x40   /* raw 5x5 luminance sum at snapshot_addr */
 #define REG_SNAPSHOT_ADDR    0x50
 #define REG_CNN_START        0x60
 #define REG_CNN_RESULT       0x70
 
-/* Reading past the 2304 image cells returns camera telemetry instead. */
-#define SNAP_RED_COUNT       2304u
-#define SNAP_COLOUR_HW       2305u
-#define SNAP_VS_COUNT        2306u   /* MIPI frame counter -- the one that matters */
-#define SNAP_PIXCLK          2307u
-#define SNAP_RETRIES         2308u
-#define SNAP_CFG_STEP        2309u
-#define SNAP_STATUS          2310u
+/* Reading past the image cells returns camera telemetry instead. Expressed as
+ * offsets from IMG_PIXELS rather than literals: these addresses moved when the
+ * capture went 48x48 -> 96x96, and a literal left behind in any one of the
+ * three host copies reads image data as telemetry, which looks exactly like a
+ * dead camera link. */
+#define SNAP_RED_COUNT       ((unsigned)IMG_PIXELS + 0u)
+#define SNAP_COLOUR_HW       ((unsigned)IMG_PIXELS + 1u)
+#define SNAP_VS_COUNT        ((unsigned)IMG_PIXELS + 2u)   /* MIPI frame counter -- the one that matters */
+#define SNAP_PIXCLK          ((unsigned)IMG_PIXELS + 3u)
+#define SNAP_RETRIES         ((unsigned)IMG_PIXELS + 4u)
+#define SNAP_CFG_STEP        ((unsigned)IMG_PIXELS + 5u)
+#define SNAP_STATUS          ((unsigned)IMG_PIXELS + 6u)
 
 #define ST_MIPI_REL(s)       ((s) & 1u)
 #define ST_CAM_REL(s)        (((s) >> 1) & 1u)
@@ -53,28 +57,35 @@
 #define RES_SCORE(r)         ((int16_t)((r) >> 16))
 
 /* ---- image geometry and fixed point ------------------------------------ */
-#define IMG_DIM              48
-#define IMG_PIXELS           (IMG_DIM * IMG_DIM)   /* 2304 */
-#define SUM_MAX              6375u   /* 25 px * 255: ITU-R 601 luminance of white */
+#define IMG_DIM              96
+#define IMG_PIXELS           (IMG_DIM * IMG_DIM)   /* 9216 */
+#define SUM_MAX              510u    /* 2 px * 255: ITU-R 601 luminance of white */
 #define Q_ONE                1024u   /* 1.0 in Q6.10 */
 
 /* ---- software digital zoom ---------------------------------------------
- * Trims the square hardware crop to the 0.595 aspect the model was trained on
- * (corner_crops(frac_w=0.25, frac_h=0.30) of a 250x350 card). Its job is
- * ASPECT, not magnification -- aim so the card's index corner fills the green
- * box on HDMI, then use these only to fix the ratio.
+ * IDENTITY, and it should stay that way. downsample_96x96.v crops 96 x 192
+ * buffer pixels into 96x96 cells of 1x2, so the hardware already delivers the
+ * model's aspect and every column is a real sample. The 48x48 build cropped a
+ * square and trimmed it here (ZOOM_W 29 of 48), which threw away 40% of the
+ * horizontal samples by stretching 29 columns back to 48.
  *
- * ZOOM_W is forgiving (24..32 all score 54/54 in simulation); ZOOM_X/ZOOM_Y
- * are where the precision is, and are rig-specific. */
-#define ZOOM_X               9
+ * The defines survive so the board's "zoom window:" line still parses in
+ * sim_card_cnn.py, and as the escape hatch if a rig ever needs a sub-crop. */
+#define ZOOM_X               0
 #define ZOOM_Y               0
-#define ZOOM_W               29      /* 29/48 = 0.60 */
-#define ZOOM_H               48
+#define ZOOM_W               96
+#define ZOOM_H               96
 
 /* Software colour decision. The fabric flag trips at ~1% red pixels, which a
  * red-and-gold face card can reach on its own; this threshold is applied to
- * the reported red_count instead. Recalibrate for your deck and lighting. */
-#define RED_THRESH_SW        5000u
+ * the reported red_count instead.
+ *
+ * RECALIBRATE. 5000 was measured on the 240x240 crop; the crop is now
+ * 96 x 192 = 18,432 pixels, 3.1x smaller, so the same card yields ~1600.
+ * Read the printed red_count for known red and black cards at your framing and
+ * put this between the two populations -- a wrong colour flag locks the suit
+ * argmax to the wrong pair before the network gets a say. */
+#define RED_THRESH_SW        1600u
 
 #define RANK_COUNT           13
 #define SUIT_COUNT           4

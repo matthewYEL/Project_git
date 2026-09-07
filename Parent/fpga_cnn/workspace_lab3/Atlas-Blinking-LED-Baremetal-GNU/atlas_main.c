@@ -1,22 +1,22 @@
 /*
  * Card recognition demo: friend's 3-head CNN (rank / suit / joker) on the FPGA.
  *
- * Flow: trigger the D8M snapshot -> wait for snapshot_done -> read the 48x48
+ * Flow: trigger the D8M snapshot -> wait for snapshot_done -> read the 96x96
  * luminance box sums plus the red pixel count -> ASCII preview (and optional
  * PGM dump) -> scale to Q6.10 -> upload to the CNN -> start -> poll done ->
  * decode rank/suit/joker.
  *
  * FRAMING IS THE WHOLE BALL GAME. The model was trained on the card's rank/suit
- * INDEX CORNER, not the whole card -- specifically the top-left 25% x 30% of a
+ * INDEX CORNER, not the whole card -- specifically the top-left 25% x 35.7% of a
  * perspective-corrected 250x350 card (friend's build_warped_dataset.py
- * corner_crops()), squashed to 48x48. Feed it the corner and it reads my_deck
+ * corner_crops()), squashed to 96x96. Feed it the corner and it reads my_deck
  * 54/54; feed it the whole card and it drops to 4/54, near chance.
  *
  * So aim that corner to FILL the green box on the HDMI output -- roughly
- * 16 x 26 mm of card, about 4x closer than framing the whole card -- and use
- * ZOOM_W/ZOOM_H below only to trim the square box to the 0.6 aspect the model
- * expects. Tolerance is tight: sliding 5% of a card width off the corner costs
- * about 75 points of accuracy, so expect to tune ZOOM_X/ZOOM_Y per rig.
+ * 16 x 26 mm of card, about 4x closer than framing the whole card. The box is
+ * now a tall rectangle carrying the model's aspect in hardware, so ZOOM_* is
+ * identity and there is nothing per-rig left to tune. Tolerance is still tight:
+ * sliding 5% of a card width off the corner costs about 75 points of accuracy.
  *
  * PIO base addresses are the lab's; only widths and bit layouts changed
  * (see ghrd_top.v). printf goes to the Arm DS App Console (semihosting).
@@ -34,9 +34,9 @@ int __auto_semihosting;
 
 #define IMG_WR_CTRL_PIO_BASE      (0xFF200000)   /* [0] wr_en, [2] colour override en, [3] colour override val */
 #define IMG_WR_DATA_PIO_BASE      (0xFF200010)   /* Q6.10 pixel */
-#define IMG_WR_ADDR_PIO_BASE      (0xFF200020)   /* 0..2303 = y*48 + x */
+#define IMG_WR_ADDR_PIO_BASE      (0xFF200020)   /* 0..9215 = y*96 + x */
 #define CAMERA_TRIGGER_PIO_BASE   (0xFF200030)
-#define SNAPSHOT_DATA_PIO_BASE    (0xFF200040)   /* raw 5x5 luminance sum; addr 2304 = red_count, 2305 = colour_hw */
+#define SNAPSHOT_DATA_PIO_BASE    (0xFF200040)   /* raw 1x2 luminance sum; addr 9216 = red_count, 9217 = colour_hw */
 
 /* Snapshot telemetry addresses and status bits moved to card_pipeline.h,
  * so app_rtos.c can read the same diagnostics. */
@@ -53,7 +53,7 @@ int __auto_semihosting;
 #define INVERT            0   /* 1: ink bright / background dark */
 #define NORMALIZE_MINMAX  0   /* 0: fixed /255-equivalent scale; 1: stretch min..max to 0..1024 */
 #define COLOUR_OVERRIDE   1   /* 1: software decides red/black from red_count instead of the hardware flag */
-#define RED_THRESH_SW     5000u
+#define RED_THRESH_SW     1600u
 #define DUMP_PGM          1   /* 1: also print the capture as an ASCII PGM (P2) for recognize_card.py */
 
 /* LIVE 1 loops forever printing one line per inference, so you can watch what
@@ -61,14 +61,15 @@ int __auto_semihosting;
  * what feeds sim_card_cnn.py -- keep it working, sim/board agreement is the
  * standing proof the accelerator is correct.
  *
- * PREVIEW_EVERY exists because semihosting putchar is slow: a full 48x48 dump is
- * ~2300 characters and would dominate the loop. Set it to 10 or so while aiming,
- * back to 0 once framed. The preview is half resolution (24x24) for the same
- * reason -- a quarter of the characters. */
+ * PREVIEW_EVERY exists because semihosting putchar is slow: a full 96x96 dump is
+ * ~9200 characters and would dominate the loop even at 261 ms per inference.
+ * Set it to 10 or so while aiming, back to 0 once framed. The preview is
+ * quarter resolution (24x24) for the same reason -- a sixteenth of the
+ * characters, and the same size the 48x48 build previewed at. */
 #define LIVE              1
 #define PREVIEW_EVERY     0
 
-/* The 2306..2310 diagnostic registers only exist once camera_capture.v has
+/* The 9218..9223 diagnostic registers only exist once camera_capture.v has
  * been recompiled into the .sof. On an older bitstream they read back as 0,
  * which is indistinguishable from a genuinely dead link -- so gate the
  * report rather than print a confident wrong verdict. Set to 1 after the
@@ -76,18 +77,21 @@ int __auto_semihosting;
  * derived from the snapshot itself. */
 #define HAVE_CAM_DIAG     1
 
-/* The hardware flag trips at red_count > 600, which is ~1% of the 240x240 crop.
- * A face card's illustration is red and gold: a Queen of Spades measured 2048
- * and came back RED, and the red flag locks the suit argmax to {H,D}
- * (card_cnn_core.v:188) before the net gets a say. A genuine red card measured
- * 10458. 5000 separates those two -- on two whole-card samples, so RECALIBRATE
- * once the framing is fixed; the number below is not meaningful at the new
- * framing.
+/* The hardware flag trips at red_count > RED_THRESH (192 in downsample_96x96.v),
+ * which is ~1% of the 96x192 crop. A face card's illustration is red and gold,
+ * and the red flag locks the suit argmax to {H,D} (card_cnn_core.v) before the
+ * net gets a say, so the threshold matters as much as the network.
+ *
+ * RECALIBRATE. The old numbers -- 2048 for a Queen of Spades, 10458 for a
+ * genuine red card, 5000 between them -- were measured on the 240x240 crop with
+ * whole cards in frame. The crop is now 18,432 pixels, 3.1x smaller, so the
+ * equivalent scaling is ~1600, which is what RED_THRESH_SW ships as. Measure
+ * your own: the log prints red_count on every line.
  *
  * PROJECT_REPORT.md section 10 gives the hardware equivalent of the Python
  * colour test directly: count pixels over the threshold and compare against 2%
- * of the region. That is ~1150 of the 57,600 pixels in the crop, against the
- * 600 (1.04%) the fabric currently uses.
+ * of the region -- ~370 of the 18,432 pixels in the crop, against the 192
+ * (1.04%) the fabric uses.
  *
  * Their detector went through seven versions (report section 6). Two of its
  * conclusions the fabric version already satisfies: a brightness floor to stop
@@ -102,35 +106,29 @@ int __auto_semihosting;
  * friends files/trainings/calibrate_color_threshold.py. */
 
 /* Software digital zoom: upload a sub-rectangle of the capture, nearest-
- * neighbour scaled back to 48x48. Units are capture cells; 0,0,48,48 = off.
+ * neighbour scaled back to IMG_DIM. Units are capture cells.
  *
- * ITS JOB IS ASPECT, NOT MAGNIFICATION. The model is trained on
- * corner_crops(warped_card, frac_w=0.25, frac_h=0.30) of a 250x350 card,
- * squashed to 48x48 by transforms.Resize -- so the crop it wants is
- * 0.25*250 / 0.30*350 = 0.595 wide-to-tall, while the hardware box
- * (downsample_48x48.v:56) is square. ZOOM_W/ZOOM_H trims the square to that
- * ratio without a Quartus recompile.
+ * IDENTITY NOW, AND IT SHOULD STAY THAT WAY. downsample_96x96.v crops
+ * 96 x 192 buffer pixels into 96x96 cells of 1x2, so the hardware already
+ * delivers the 0.5 aspect the retrained model wants and every column is a real
+ * sample. The 48x48 build could not: its crop was square, so this trimmed it
+ * to ZOOM_W 29 of 48 and stretched 29 columns back to 48, throwing away 40% of
+ * the horizontal samples.
  *
- * So AIM THE CORNER TO FILL THE BOX and let this only fix the aspect. Do not
- * use it to magnify a distant card: the 48x48 is already a 5x5 box-average,
- * and re-magnifying it resamples detail the camera pipeline already threw
- * away.
+ * AIM THE CORNER TO FILL THE BOX -- the green box is now a tall rectangle that
+ * matches the crop, so what you see is what the network gets. Do not use these
+ * to magnify a distant card: re-magnifying resamples detail the camera pipeline
+ * already threw away.
  *
- * Simulated end to end against my_deck (corner in a square box -> 5x5 average
- * -> this zoom -> the deployed weights), ZOOM_W 24..32 all score 54/54.
- * 36 falls to 74%, and leaving it square at 48 gives 24% -- so the ratio is
- * forgiving and ZOOM_X/ZOOM_Y is where the real precision is needed: sliding
- * 5% of a card width off the corner costs ~75 points of accuracy.
- *
- * Read ZOOM_X/ZOOM_Y off the printed PGM for your actual rig; 9 centres a
- * 29-wide window. Verify with: python sim_card_cnn.py <paste> */
-#define ZOOM_X   9
+ * Kept as an escape hatch, and so the "zoom window:" line the board prints
+ * still parses in sim_card_cnn.py. Verify with: python sim_card_cnn.py <paste> */
+#define ZOOM_X   0
 #define ZOOM_Y   0
-#define ZOOM_W  29      /* 29/48 = 0.60 */
-#define ZOOM_H  48
+#define ZOOM_W  96
+#define ZOOM_H  96
 
 #if (ZOOM_X + ZOOM_W > IMG_DIM) || (ZOOM_Y + ZOOM_H > IMG_DIM) || (ZOOM_W < 1) || (ZOOM_H < 1)
-#error "zoom window falls outside the 48x48 capture"
+#error "zoom window falls outside the capture"
 #endif
 
 static const char *const RANK_NAMES[13] = {"2","3","4","5","6","7","8","9","10","J","Q","K","A"};
@@ -252,7 +250,7 @@ unsigned upload_and_infer(const uint16_t *q, unsigned red_count)
     return 0;
 }
 
-/* step 1 = full 48x48, step 2 = 24x24. Same character ramp either way, so a
+/* step 1 = full 96x96, step 4 = 24x24. Same character ramp either way, so a
  * preview can be compared straight against a reference corner crop. */
 static void print_preview(const uint16_t *raw, int step)
 {
@@ -401,7 +399,7 @@ int main(void)
 
 #if PREVIEW_EVERY
             if ((frame % PREVIEW_EVERY) == 0) {
-                print_preview(raw, 2);
+                print_preview(raw, 4);
                 putchar('\n');
             }
 #endif
@@ -418,12 +416,12 @@ int main(void)
             return 1;
         }
 
-        printf("Reading 48x48 snapshot...\n");
+        printf("Reading 96x96 snapshot...\n");
         read_snapshot(raw, &minv, &maxv);
         red_count = snap_read(SNAP_RED_COUNT);
         colour_hw = snap_read(SNAP_COLOUR_HW) & 1u;
 
-        printf("\nCaptured 48x48 (raw luminance sums)  min %u  max %u  red_count %u  colour_hw %s\n",
+        printf("\nCaptured 96x96 (raw luminance sums)  min %u  max %u  red_count %u  colour_hw %s\n",
                minv, maxv, red_count, colour_hw ? "RED" : "black");
         print_preview(raw, 1);
         putchar('\n');

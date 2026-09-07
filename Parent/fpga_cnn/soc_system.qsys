@@ -947,7 +947,7 @@
   <parameter name="resetValue" value="0" />
   <parameter name="simDoTestBenchWiring" value="false" />
   <parameter name="simDrivenValue" value="0" />
-  <parameter name="width" value="12" />
+  <parameter name="width" value="14" />
  </module>
  <module
    name="img_wr_ctrl_pio"
@@ -1047,7 +1047,7 @@
   <parameter name="resetValue" value="0" />
   <parameter name="simDoTestBenchWiring" value="false" />
   <parameter name="simDrivenValue" value="0" />
-  <parameter name="width" value="12" />
+  <parameter name="width" value="14" />
  </module>
  <module
    name="snapshot_data_pio"

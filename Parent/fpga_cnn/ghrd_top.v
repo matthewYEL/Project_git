@@ -131,12 +131,12 @@ module ghrd_top (
   // ---------- HPS <-> CNN / camera PIOs (see atlas_main.c for the bit layout) ----------
   wire [31:0] cnn_result_wire;     // [3:0] rank [5:4] suit [6] joker [7] done [8] colour [9] snapshot_done [31:16] rank_score
   wire        cnn_start_wire;
-  wire [11:0] img_wr_addr_wire;    // 0..2303 = y*48 + x
+  wire [13:0] img_wr_addr_wire;    // 0..9215 = y*96 + x
   wire [15:0] img_wr_data_wire;    // Q6.10 pixel
   wire [3:0]  img_wr_ctrl_wire;    // [0] wr_en, [1] unused, [2] colour override en, [3] colour override val
 
   // ---------- 新增：摄像头相关连线 ----------
-  wire [11:0] snapshot_addr_wire;  // 0..2303 cells, 2304 = red_count, 2305 = colour flag
+  wire [13:0] snapshot_addr_wire;  // 0..9215 cells, 9216 = red_count, 9217 = colour flag
   wire [15:0] snapshot_data_wire;
   wire        camera_trigger_wire;
   wire        snapshot_done_w, snapshot_colour_w;
@@ -235,7 +235,7 @@ debounce debounce_inst (
   defparam debounce_inst.TIMEOUT = 50000;
   defparam debounce_inst.TIMEOUT_WIDTH = 16;
 
-  // ---------- friend's 3-head card CNN (48x48 in, Q6.10) ----------
+  // ---------- friend's 3-head card CNN (96x96 in, Q6.10) ----------
   wire        core_done;
   wire [3:0]  rank_idx;
   wire [1:0]  suit_idx;

@@ -708,7 +708,7 @@ set_global_assignment -name VERILOG_FILE ip/edge_detect/altera_edge_detector.v
 set_global_assignment -name VERILOG_FILE ip/debounce/debounce.v
 set_global_assignment -name VERILOG_FILE camera_test.v
 set_global_assignment -name VERILOG_FILE output_files/RESET_DELAY_HDMI.v
-set_global_assignment -name VERILOG_FILE downsample_48x48.v
+set_global_assignment -name VERILOG_FILE downsample_96x96.v
 set_global_assignment -name VERILOG_FILE button_edge_detect.v
 set_global_assignment -name VERILOG_FILE camera_capture.v
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
