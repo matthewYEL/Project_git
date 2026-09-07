@@ -1,0 +1,37 @@
+/*
+ * CNN Inference Trigger + Read Result
+ */
+
+#include <stdio.h>
+#include "socal.h"
+#include "hps_0_arm_a9_0.h"
+
+int __auto_semihosting;
+
+#define CNN_START_PIO_BASE   (0xFF200000)
+#define CNN_RESULT_PIO_BASE  (0xFF200010)
+
+int main(int argc, char** argv)
+{
+	unsigned int result;
+	unsigned int predicted_digit;
+	unsigned int done;
+
+	printf("Triggering CNN inference...\n");
+
+	// 触发一次推理：写1再写0，形成一个"脉冲"
+	alt_write_word(CNN_START_PIO_BASE, 1);
+	alt_write_word(CNN_START_PIO_BASE, 0);
+
+	// 轮询等待推理完成（读result的第4位，即done标志）
+	do {
+		result = alt_read_word(CNN_RESULT_PIO_BASE);
+		done = (result >> 4) & 0x1;
+	} while (!done);
+
+	predicted_digit = result & 0xF;
+
+	printf("Predicted digit: %d\n", predicted_digit);
+
+	return 0;
+}

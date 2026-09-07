@@ -1,0 +1,26 @@
+#Wed Jul 29 16:42:15 SGT 2026
+options.ETF.etfBuffer=false
+options.ETF.etfBuffer.size=0x1000
+options.ETR.etrBuffer=false
+options.ETR.etrBuffer.scatterGather=false
+options.ETR.etrBuffer.size=0x8000
+options.ETR.etrBuffer.start=0x100000
+options.STM.stm=false
+options.cortexA9.coreTrace=false
+options.cortexA9.coreTrace.Cortex_A9_0=true
+options.cortexA9.coreTrace.Cortex_A9_1=true
+options.cortexA9.coreTrace.contextIDs=true
+options.cortexA9.coreTrace.contextIDs.contextIDsSize=32
+options.cortexA9.coreTrace.cycleAccurate=false
+options.cortexA9.coreTrace.timestamp=true
+options.cortexA9.coreTrace.timestamp.tsPeriod=4000
+options.cortexA9.coreTrace.traceRange=false
+options.cortexA9.coreTrace.traceRange.end=0xFFFFFFFF
+options.cortexA9.coreTrace.traceRange.start=0x0
+options.cortexA9.coreTrace.triggerhalt=false
+options.traceBuffer.timestampFrequency=25000000
+options.traceBuffer.traceCapture=none
+options.xtrig.access.canAccess=false
+options.xtrig.xtrigFPGA0=false
+options.xtrig.xtrigFPGA1=false
+options.xtrig.xtrigHPS=false

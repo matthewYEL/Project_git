@@ -1,0 +1,81 @@
+#include <stdio.h>
+#include "socal.h"
+#include "hps_0_arm_a9_0.h"
+
+int __auto_semihosting;
+
+#define IMG_WR_CTRL_PIO_BASE      (0xFF200000)
+#define IMG_WR_DATA_PIO_BASE      (0xFF200010)
+#define IMG_WR_ADDR_PIO_BASE      (0xFF200020)
+#define CAMERA_TRIGGER_PIO_BASE   (0xFF200030)
+#define SNAPSHOT_DATA_PIO_BASE    (0xFF200040)
+#define SNAPSHOT_ADDR_PIO_BASE    (0xFF200050)
+#define CNN_START_PIO_BASE        (0xFF200060)
+#define CNN_RESULT_PIO_BASE       (0xFF200070)
+
+int main(int argc, char** argv)
+{
+    int i, j;
+    unsigned int val;
+    short pixels[784];
+
+    // ---------- 第一步：拍照 ----------
+    printf("Triggering camera capture...\n");
+    alt_write_word(CAMERA_TRIGGER_PIO_BASE, 1);
+    alt_write_word(CAMERA_TRIGGER_PIO_BASE, 0);
+    for (volatile int d = 0; d < 5000000; d++);
+
+    // ---------- 第二步：读取784个像素到HPS ----------
+    printf("Reading snapshot...\n");
+    for (i = 0; i < 784; i++) {
+        alt_write_word(SNAPSHOT_ADDR_PIO_BASE, i);
+        for (volatile int d = 0; d < 10; d++);
+        val = alt_read_word(SNAPSHOT_DATA_PIO_BASE);
+        pixels[i] = (short)(val & 0xFFFF);
+    }
+
+    // ---------- 打印字符画，确认拍到了什么 ----------
+    printf("\nCaptured 28x28 image:\n");
+    for (i = 0; i < 28; i++) {
+        for (j = 0; j < 28; j++) {
+            int p = pixels[i*28 + j];
+            char c;
+            if (p < 500)       c = '.';
+            else if (p < 1500) c = '-';
+            else if (p < 2500) c = '+';
+            else if (p < 3500) c = '#';
+            else               c = '@';
+            printf("%c", c);
+        }
+        printf("\n");
+    }
+    printf("\n");
+
+    // ---------- 第三步：把这784个像素写进CNN的image_mem ----------
+    printf("Loading image into CNN...\n");
+    for (i = 0; i < 784; i++) {
+        alt_write_word(IMG_WR_ADDR_PIO_BASE, i);
+        alt_write_word(IMG_WR_DATA_PIO_BASE, (unsigned int)(unsigned short)pixels[i]);
+        alt_write_word(IMG_WR_CTRL_PIO_BASE, 0x1);
+        for (volatile int d = 0; d < 10; d++);
+        alt_write_word(IMG_WR_CTRL_PIO_BASE, 0x0);
+    }
+
+    // ---------- 第四步：标记加载完成，触发CNN开始推理 ----------
+    alt_write_word(IMG_WR_CTRL_PIO_BASE, 0x2);
+    alt_write_word(CNN_START_PIO_BASE, 1);
+    alt_write_word(CNN_START_PIO_BASE, 0);
+
+    // ---------- 第五步：轮询等待CNN完成，读取结果 ----------
+    printf("Running inference...\n");
+    unsigned int result, predicted_digit, done;
+    do {
+        result = alt_read_word(CNN_RESULT_PIO_BASE);
+        done = (result >> 4) & 0x1;
+    } while (!done);
+    predicted_digit = result & 0xF;
+
+    printf("\n=== Predicted digit: %d ===\n", predicted_digit);
+
+    return 0;
+}

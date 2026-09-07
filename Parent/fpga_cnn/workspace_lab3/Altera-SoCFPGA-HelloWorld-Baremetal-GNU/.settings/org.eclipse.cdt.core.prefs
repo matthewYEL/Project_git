@@ -1,0 +1,6 @@
+eclipse.preferences.version=1
+environment/project/cdt.managedbuild.toolchain.gnu.base.677096465/PATH/delimiter=;
+environment/project/cdt.managedbuild.toolchain.gnu.base.677096465/PATH/operation=append
+environment/project/cdt.managedbuild.toolchain.gnu.base.677096465/PATH/value=C\:\\gcc75new\\gcc-linaro-7.5.0-2019.12-i686-mingw32_arm-eabi\\bin;${env_var\:PATH}
+environment/project/cdt.managedbuild.toolchain.gnu.base.677096465/append=true
+environment/project/cdt.managedbuild.toolchain.gnu.base.677096465/appendContributed=true

@@ -1,0 +1,16 @@
+17:16:46 **** Build of configuration Default for project Altera-SoCFPGA-Blinking-LED-Linux-GNU ****
+Info: Configuration "Default" uses tool-chain "com.arm.eclipse.cdt.managedbuild.ds5.gcc.toolchain" that is unsupported on this system, attempting to build anyway.
+make all 
+make -C server
+make[1]: Entering directory 'C:/lab/soc_lab/cv_soc_lab/workspace_lab3/Altera-SoCFPGA-Blinking-LED-Linux-GNU/server'
+arm-linux-gnueabihf-gcc -g -O0 -Werror -Wall -lpthread -c scroll_server.c -o scroll_server.o
+process_begin: CreateProcess(NULL, arm-linux-gnueabihf-gcc -g -O0 -Werror -Wall -lpthread -c scroll_server.c -o scroll_server.o, ...) failed.
+make (e=2): The system cannot find the file specified.
+make[1]: Leaving directory 'C:/lab/soc_lab/cv_soc_lab/workspace_lab3/Altera-SoCFPGA-Blinking-LED-Linux-GNU/server'
+
+make[1]: *** [Makefile:31: scroll_server.o] Error 2
+make: *** [Makefile:2: all] Error 2
+"make all" terminated with exit code 2. Build might be incomplete.
+
+17:16:46 Build Failed. 2 errors, 0 warnings. (took 311ms)
+

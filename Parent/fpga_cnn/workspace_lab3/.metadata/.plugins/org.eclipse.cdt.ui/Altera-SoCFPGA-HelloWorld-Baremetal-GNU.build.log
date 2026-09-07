@@ -1,0 +1,9 @@
+16:40:36 **** Build of configuration Default for project Altera-SoCFPGA-HelloWorld-Baremetal-GNU ****
+make all 
+arm-eabi-gcc -mfloat-abi=softfp -mtune=cortex-a9 -mcpu=cortex-a9   -g -O0 -Werror -Wall -Wstrict-prototypes -c hello.c -o hello.o
+arm-eabi-g++ -Tcvav-ocr.ld -mfloat-abi=softfp -mtune=cortex-a9 -mcpu=cortex-a9   hello.o -o hello.axf
+arm-eabi-objdump -d hello.axf > hello.axf.objdump
+arm-eabi-nm hello.axf > hello.axf.map
+
+16:40:40 Build Finished. 0 errors, 0 warnings. (took 3s.199ms)
+

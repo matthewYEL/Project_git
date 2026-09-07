@@ -1,0 +1,32 @@
+/*
+ * Copyright Altera 2013
+ * All Rights Reserved
+ * File: hello.c
+ *
+ */
+
+#include <stdio.h>
+#include "socal.h"
+
+/* enable semihosting with Arm DS by defining an __auto_semihosting symbol
+   will be removed by linker if semihosting is disabled */
+int __auto_semihosting;
+
+#define LED_BASE_ADDR (0xFF210040)
+
+int main(int argc, char** argv)
+{
+	int i;
+
+	printf("Hello from Atlas. \n");
+
+	while(1)
+	{
+		for(i=0; i < 16; i++){
+			alt_write_word(LED_BASE_ADDR,i);
+			printf("LED [%x] \n",i);
+		}
+	}
+
+	return 0;
+}

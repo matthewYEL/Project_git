@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Delete resource &apos;Altera-SoCFPGA-Blinking-LED-Linux-GNU&apos;" deleteContents="false" description="Delete resource &apos;Altera-SoCFPGA-Blinking-LED-Linux-GNU&apos;" element1="/Altera-SoCFPGA-Blinking-LED-Linux-GNU" flags="7" id="org.eclipse.ltk.core.refactoring.delete.resources" resources="1" stamp="1785316648413"/>
+</session>
