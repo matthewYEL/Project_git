@@ -1,0 +1,118 @@
+# Repo root is Project_git/; the Quartus project lives in Parent/fpga_cnn/,
+# so directory rules are anchored with that prefix. Extension globs are left
+# unanchored so they match wherever Quartus drops them.
+
+# ---------------- Quartus Prime - generated dirs ----------------
+Parent/fpga_cnn/db/
+Parent/fpga_cnn/incremental_db/
+Parent/fpga_cnn/greybox_tmp/
+Parent/fpga_cnn/timing/
+Parent/fpga_cnn/.qsys_edit/
+Parent/fpga_cnn/qsys_edit.tcl
+
+# Quartus output dir - drop artifacts, keep any HDL source placed there
+Parent/fpga_cnn/output_files/*
+!Parent/fpga_cnn/output_files/*.v
+!Parent/fpga_cnn/output_files/*.sv
+!Parent/fpga_cnn/output_files/*.vhd
+!Parent/fpga_cnn/output_files/*.vhdl
+
+# ---------------- Qsys / Platform Designer / SoC ----------------
+Parent/fpga_cnn/hps_isw_handoff/
+Parent/fpga_cnn/ip_upgrade_port_diff_reports/
+
+# IP / PLL simulation model output (matches at any depth)
+*_sim/
+*_sim.f
+simulation/
+
+# ---------------- Quartus - generated files (any depth) ----------------
+*.rpt
+*.summary
+*.smsg
+*.pin
+*.done
+*.jdi
+*.jditmp
+*.sld
+*.cdf
+*.qws
+*.qarlog
+*.ipregen.rpt
+c5_pin_model_dump.txt
+PLLJ_PLLSPE_INFO.txt
+
+# Programming / bitstream outputs
+*.sof
+*.pof
+*.jam
+*.jbc
+*.rbf
+*.jic
+*.svf
+
+# ---------------- Editor / OS / backups ----------------
+*.bak
+*.BAK
+*.BAK.qsys
+*.orig
+*.*-bak
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------- pre-existing u-boot / BSP workarounds ----------------
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/arm/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/arm/dts/zynq-zc770-xm011-x16.dts
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/arm/include/asm/arch/mach
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/microblaze/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/mips/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/nios2/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/sandbox/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/x86/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/arch/xtensa/dts/include/dt-bindings
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynq/zynq-cse-nand
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynq/zynq-cse-nor
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynq/zynq-cse-qspi-single
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/avnet-ultra96-rev1
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/zynqmp-mini
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/zynqmp-mini-emmc0
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/zynqmp-mini-emmc1
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/zynqmp-mini-qspi
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/zynqmp-zc1275-revA
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/board/xilinx/zynqmp/zynqmp-zcu104-revC
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/binman/binman
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/binman/test/u_boot_binman_syms_bad.c
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/buildman/buildman
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/dtoc/dtoc
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/dtoc/test_fdt
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/microcode-tool
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/patman/patman
+Parent/fpga_cnn/software/spl_bsp/uboot-socfpga/tools/version.h
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/arm/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/arm/dts/zynq-zc770-xm011-x16.dts
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/arm/include/asm/arch
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/microblaze/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/mips/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/nios2/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/sandbox/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/x86/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/arch/xtensa/dts/include/dt-bindings
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynq/zynq-cse-nand
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynq/zynq-cse-nor
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynq/zynq-cse-qspi-single
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/avnet-ultra96-rev1
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/zynqmp-mini
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/zynqmp-mini-emmc0
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/zynqmp-mini-emmc1
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/zynqmp-mini-qspi
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/zynqmp-zc1275-revA
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/board/xilinx/zynqmp/zynqmp-zcu104-revC
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/binman/binman
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/binman/test/u_boot_binman_syms_bad.c
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/buildman/buildman
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/dtoc/dtoc
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/dtoc/test_fdt
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/microcode-tool
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/patman/patman
+Parent/fpga_cnn/solution/uboot-socfpga/u-boot-socfpga-ACDS20.1STD_REL_GSRD_PR/tools/version.h
