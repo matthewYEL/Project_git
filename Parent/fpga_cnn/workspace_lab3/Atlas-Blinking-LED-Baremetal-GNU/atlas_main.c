@@ -27,6 +27,9 @@
 #include "socal.h"
 #include "hps_0_arm_a9_0.h"
 
+#include "app_config.h"
+#include "card_pipeline.h"
+
 int __auto_semihosting;
 
 #define IMG_WR_CTRL_PIO_BASE      (0xFF200000)   /* [0] wr_en, [2] colour override en, [3] colour override val */
@@ -35,40 +38,15 @@ int __auto_semihosting;
 #define CAMERA_TRIGGER_PIO_BASE   (0xFF200030)
 #define SNAPSHOT_DATA_PIO_BASE    (0xFF200040)   /* raw 5x5 luminance sum; addr 2304 = red_count, 2305 = colour_hw */
 
-/* Camera-link diagnostics, added to camera_capture.v alongside the snapshot RAM.
- * vs_count is the one that matters: if it does not advance, no MIPI frames are
- * arriving and every prediction is the network's response to a blank image. */
-#define SNAP_RED_COUNT    2304u
-#define SNAP_COLOUR_HW    2305u
-#define SNAP_VS_COUNT     2306u   /* MIPI frame counter */
-#define SNAP_PIXCLK       2307u   /* MIPI pixel-clock activity counter */
-#define SNAP_RETRIES      2308u   /* I2C config re-runs forced by the watchdog */
-#define SNAP_CFG_STEP     2309u   /* where the config sequence got to */
-#define SNAP_STATUS       2310u
-#define ST_MIPI_REL(s)    ((s) & 1u)
-#define ST_CAM_REL(s)     (((s) >> 1) & 1u)
-#define ST_AUDPLL_OK(s)   (((s) >> 2) & 1u)   /* AUDIO pll (feeds HDMI), NOT the MIPI clock */
-#define ST_HDMI_RDY(s)    (((s) >> 3) & 1u)
-/* 2311 = wde_ticks, added after this build -- the earlier sticky saw_wde bit
- * was folded to a constant by synthesis and removed, so it is not read here. */
-#define SNAP_WDE_TICKS    2311u
+/* Snapshot telemetry addresses and status bits moved to card_pipeline.h,
+ * so app_rtos.c can read the same diagnostics. */
 #define SNAPSHOT_ADDR_PIO_BASE    (0xFF200050)
 #define CNN_START_PIO_BASE        (0xFF200060)
 #define CNN_RESULT_PIO_BASE       (0xFF200070)
 
-/* cnn_result_pio bit layout */
-#define RES_RANK(r)       ((r) & 0xFu)
-#define RES_SUIT(r)       (((r) >> 4) & 0x3u)
-#define RES_JOKER(r)      (((r) >> 6) & 0x1u)
-#define RES_DONE(r)       (((r) >> 7) & 0x1u)
-#define RES_COLOUR(r)     (((r) >> 8) & 0x1u)
-#define RES_SNAP_DONE(r)  (((r) >> 9) & 0x1u)
-#define RES_SCORE(r)      ((int16_t)((r) >> 16))
-
-#define IMG_DIM      48
-#define IMG_PIXELS   (IMG_DIM * IMG_DIM)      /* 2304 */
-#define SUM_MAX      6375u                    /* 25 px * 255 (ITU-R 601 luminance of white) */
-#define Q_ONE        1024u                    /* 1.0 in Q6.10 */
+/* cnn_result bit layout, image geometry and the pipeline stage
+ * prototypes now live in card_pipeline.h, so amp.c and app_rtos.c
+ * share this one definition of them. */
 
 /* Experiment switches - no FPGA recompile needed.
  * Defaults match the training pipeline: PIL convert("L") -> ToTensor() (/255), no inversion. */
@@ -160,7 +138,7 @@ static const char *const SUIT_NAMES[4]  = {"Spades","Clubs","Hearts","Diamonds"}
 
 static void delay(volatile int n) { while (n--) ; }
 
-static unsigned snap_read(unsigned addr)
+unsigned snap_read(unsigned addr)
 {
     alt_write_word(SNAPSHOT_ADDR_PIO_BASE, addr);
     (void)alt_read_word(SNAPSHOT_DATA_PIO_BASE);          /* registered RAM read: one dummy access */
@@ -169,7 +147,7 @@ static unsigned snap_read(unsigned addr)
 
 /* ---- pipeline stages, shared by the live loop and the one-shot path ---- */
 
-static int capture_once(void)
+int capture_once(void)
 {
     int i;
     unsigned r = 0;
@@ -188,7 +166,7 @@ static int capture_once(void)
     return 0;
 }
 
-static void read_snapshot(uint16_t *raw, unsigned *minv, unsigned *maxv)
+void read_snapshot(uint16_t *raw, unsigned *minv, unsigned *maxv)
 {
     int i;
     unsigned lo = 0xFFFFu, hi = 0;
@@ -204,7 +182,7 @@ static void read_snapshot(uint16_t *raw, unsigned *minv, unsigned *maxv)
 /* Crop to the zoom window and rescale to Q6.10. See the ZOOM_* notes above: the
  * window's job is to trim the square capture to the 0.6 aspect the model was
  * trained on, not to magnify. */
-static void preprocess(const uint16_t *raw, uint16_t *q)
+void preprocess(const uint16_t *raw, uint16_t *q)
 {
     int i, j;
 
@@ -246,7 +224,7 @@ static void preprocess(const uint16_t *raw, uint16_t *q)
 
 /* Returns the raw result word, or 0 on timeout. Bit 7 (done) is always set in a
  * real result, so 0 is unambiguous. */
-static unsigned upload_and_infer(const uint16_t *q, unsigned red_count)
+unsigned upload_and_infer(const uint16_t *q, unsigned red_count)
 {
     int i;
     unsigned r = 0;
@@ -291,7 +269,7 @@ static void print_preview(const uint16_t *raw, int step)
     }
 }
 
-static void print_result_name(unsigned r)
+void print_result_name(unsigned r)
 {
     unsigned rank = RES_RANK(r), suit = RES_SUIT(r);
     if (RES_JOKER(r))    printf("%-14s", "JOKER");
@@ -318,7 +296,7 @@ static void print_camera_diag(void)
 
 /* The camera is the thing that has actually been failing, so say so plainly
  * rather than letting a blank frame come back as a confident card. */
-static void check_camera_alive(void)
+void check_camera_alive(void)
 {
 #if !HAVE_CAM_DIAG
     printf("camera diagnostics absent from this bitstream -- recompile\n"
@@ -357,6 +335,19 @@ static void check_camera_alive(void)
     }
 #endif
 }
+
+#if RTOS_MODE
+
+/* FreeRTOS build: the pipeline is driven by the tasks in app_rtos.c, which
+ * call the same stages above, and the preprocessing stage runs on CPU1.
+ * Set RTOS_MODE to 0 in app_config.h to get the original single-threaded
+ * polling app back. */
+int main(void)
+{
+    return rtos_main();
+}
+
+#else
 
 int main(void)
 {
@@ -467,3 +458,5 @@ int main(void)
     }
 #endif
 }
+
+#endif /* RTOS_MODE */

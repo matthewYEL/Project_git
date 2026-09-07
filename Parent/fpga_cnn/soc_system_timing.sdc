@@ -1,8 +1,13 @@
 # 50MHz board input clock
 #create_clock -period 20 [get_ports fpga_clk_50]
 create_clock -period 20 [get_ports FPGA_CLK1_50]
-create_clock -period 10 [get_ports FPGA_CLK2_50]
-create_clock -period 10 [get_ports FPGA_CLK3_50]
+# FPGA_CLK2_50 / FPGA_CLK3_50 are 50 MHz board clocks, exactly like
+# FPGA_CLK1_50 above -- the stock GHRD declared them at 10 ns (100 MHz),
+# so every clock derived from them (VIDEO_PLL -> MIPI_REFCLK 20 MHz,
+# VGA_CLK 25 MHz) was analysed at double its real frequency. That is the
+# source of the -9.680 ns setup slack on FPGA_CLK2_50, not a real failure.
+create_clock -period 20 [get_ports FPGA_CLK2_50]
+create_clock -period 20 [get_ports FPGA_CLK3_50]
 
 # for enhancing USB BlasterII to be reliable, 25MHz
 create_clock -name {altera_reserved_tck} -period 40 {altera_reserved_tck}
