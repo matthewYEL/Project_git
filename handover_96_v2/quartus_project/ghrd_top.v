@@ -1,3 +1,40 @@
+// ghrd_top.v  --  camera removed so the accelerator fits
+//
+// WHY THE CAMERA IS GONE
+//   camera_capture's ON_CHIP_FRAM frame buffer consumes roughly 410 of the
+//   device's 553 M10K blocks -- more than the entire CNN. With the
+//   accelerator's 364 blocks and the lab's 64-block on-chip RAM, the design
+//   needed 838 and the fitter gave up.
+//
+//   Without the camera: 364 + 64 = 428 blocks. Fits with room to spare.
+//
+//   Milestone 1 does not need the camera. Its card criteria are 10 marks for
+//   detecting one numeric and one alphabetic rank "under controlled
+//   conditions", which the PGM route satisfies -- images on the SD card, fed
+//   to the accelerator by card_cnn.c. The 90 marks for the SoC build,
+//   dual-core Linux, and a CNN producing a verifiable inference output are
+//   all unaffected.
+//
+// GETTING THE CAMERA BACK LATER
+//   It will not fit alongside the accelerator on this device as-is, even with
+//   8-bit weights. The frame buffer has to move to DDR3 (which is exactly what
+//   the spec's "External DRAM interface" and the viva topic on "frame
+//   buffering, external DRAM access and bandwidth considerations" are pointing
+//   at), or shrink to just the crop window instead of a full VGA frame.
+//
+// WHAT ELSE TO DO
+//   1. Remove the camera sources from the Quartus project file list:
+//      camera_capture.v, RAW2RGB_J, ON_CHIP_FRAM/FRAM_BUFF, the MIPI/HDMI
+//      config modules, downsample_28x28.v, capture_snapshot.v.
+//      Deleting the instantiation is not enough on its own -- unused modules
+//      still get compiled if they are in the project.
+//   2. soc_system.qsys needs NO changes. The snapshot and camera-trigger PIOs
+//      stay; they simply do nothing now. Leaving them avoids regenerating and
+//      costs a handful of logic elements.
+//   3. The .qsf will have pin assignments for the removed HDMI/MIPI ports.
+//      Quartus warns about orphaned assignments; it does not error. Ignore
+//      them, or delete those lines if the warnings bother you.
+
 module ghrd_top (
 	output wire [14:0] hps_memory_mem_a,
 	output wire [2:0]  hps_memory_mem_ba,
@@ -74,36 +111,10 @@ module ghrd_top (
     inout              ARDUINO_RESET_N,
     input              FPGA_CLK1_50,
     input              FPGA_CLK2_50,
-    input              FPGA_CLK3_50,
+    input              FPGA_CLK3_50
 
-    // ---------- 新增：HDMI引脚 ----------
-    inout  wire        HDMI_I2C_SCL,
-    inout  wire        HDMI_I2C_SDA,
-    inout  wire        HDMI_I2S,
-    inout  wire        HDMI_LRCLK,
-    inout  wire        HDMI_MCLK,
-    inout  wire        HDMI_SCLK,
-    output wire        HDMI_TX_CLK,
-    output wire        HDMI_TX_DE,
-    output wire [23:0] HDMI_TX_D,
-    output wire        HDMI_TX_HS,
-    input  wire        HDMI_TX_INT,
-    output wire        HDMI_TX_VS,
-
-    // ---------- 新增：Camera/MIPI引脚 ----------
-    inout  wire        CAMERA_I2C_SCL,
-    inout  wire        CAMERA_I2C_SDA,
-    output wire        CAMERA_PWDN_n,
-    output wire        MIPI_CS_n,
-    inout  wire        MIPI_I2C_SCL,
-    inout  wire        MIPI_I2C_SDA,
-    output wire        MIPI_MCLK,
-    input  wire        MIPI_PIXEL_CLK,
-    input  wire [9:0]  MIPI_PIXEL_D,
-    input  wire        MIPI_PIXEL_HS,
-    input  wire        MIPI_PIXEL_VS,
-    output wire        MIPI_REFCLK,
-    output wire        MIPI_RESET_n
+    // HDMI and camera/MIPI ports removed along with camera_capture.
+    // Restore them when the frame buffer moves to DDR3.
 );
 
   wire fpga_clk_50;
@@ -112,34 +123,31 @@ module ghrd_top (
   wire [1:0]  fpga_button_pio;
 
   assign fpga_clk_50 = FPGA_CLK1_50;
-  wire dbg_mipi_rel, dbg_cam_rel, dbg_hdmi_rdy, dbg_pll_ok;
-  wire [4:0] dbg_lut_index;
-  wire dbg_ack, dbg_ready_latched, dbg_hdmi_int;
-  // LED7 = config completed at least once (sticky), LED6 = HDMI_TX_INT,
-  // LED5..1 = LUT_INDEX in binary (0-31), LED0 = live ACK (1 = NACK).
-  assign LED = {dbg_ready_latched, dbg_hdmi_int, dbg_lut_index, dbg_ack};
+  assign LED = fpga_led_pio;
   assign fpga_dipsw_pio = SW;
   assign fpga_button_pio = KEY;
 
   wire [1:0] fpga_debounced_buttons;
-  wire [7:0]  fpga_led_internal;
-  wire        hps_fpga_reset_n;
-  wire [2:0]  hps_reset_req;
+  wire [7:0] fpga_led_internal;
+  wire       hps_fpga_reset_n;
 
   assign fpga_led_pio = fpga_led_internal;
 
-  // ---------- HPS <-> CNN / camera PIOs (see atlas_main.c for the bit layout) ----------
-  wire [31:0] cnn_result_wire;     // [3:0] rank [5:4] suit [6] joker [7] done [8] colour [9] snapshot_done [31:16] rank_score
+  // ---- orphaned PIO nets --------------------------------------------------
+  // The lab's CNN and the camera are both gone, but their PIOs remain in
+  // soc_system. Only the INPUT pios need driving -- an undriven input floats
+  // and Quartus warns. Output pios may simply go unread.
+  wire [4:0]  cnn_result_wire;
   wire        cnn_start_wire;
-  wire [13:0] img_wr_addr_wire;    // PIO is 14 bits; core uses [11:0] = 0..2303 = y*48 + x
-  wire [15:0] img_wr_data_wire;    // Q6.10 pixel
-  wire [3:0]  img_wr_ctrl_wire;    // [0] wr_en, [1] unused, [2] colour override en, [3] colour override val
-
-  // ---------- 新增：摄像头相关连线 ----------
-  wire [13:0] snapshot_addr_wire;  // 0..9215 cells, 9216 = red_count, 9217 = colour flag
+  wire [9:0]  img_wr_addr_wire;
+  wire [15:0] img_wr_data_wire;
+  wire [1:0]  img_wr_ctrl_wire;
+  wire [9:0]  snapshot_addr_wire;
   wire [15:0] snapshot_data_wire;
   wire        camera_trigger_wire;
-  wire        snapshot_done_w, snapshot_colour_w;
+
+  assign cnn_result_wire   = 5'b0;    // input pio, lab CNN removed
+  assign snapshot_data_wire = 16'b0;  // input pio, camera removed
 
 soc_system soc_inst (
   .memory_mem_a                         (hps_memory_mem_a),
@@ -211,11 +219,17 @@ soc_system soc_inst (
   .hps_io_hps_io_gpio_inst_GPIO54 (hps_gpio_GPIO54),
   .hps_io_hps_io_gpio_inst_GPIO61 (hps_gpio_GPIO61),
   .clk_clk                              (fpga_clk_50),
-  .h2f_reset_reset_n              (hps_fpga_reset_n),
+  .h2f_reset_reset_n                    (hps_fpga_reset_n),
   .reset_reset_n                        (hps_fpga_reset_n),
+
+  // colour_flag_hw conduit. Tied low: the HPS supplies the colour flag via
+  // CONTROL bit 1. CHECK THE EXACT PORT NAME against the generated
+  // soc_system.v -- search it for "card_cnn" -- and delete this line if the
+  // conduit was not exported.
+  .card_cnn_avalon_0_conduit_end_export (1'b0),
+
   .cnn_result_pio_external_connection_export (cnn_result_wire),
   .cnn_start_pio_external_connection_export  (cnn_start_wire),
-  // ---------- 新增：接三个摄像头相关PIO ----------
   .snapshot_addr_pio_external_connection_export          (snapshot_addr_wire),
   .snapshot_data_pio_external_connection_export          (snapshot_data_wire),
   .camera_capture_trigger_pio_external_connection_export (camera_trigger_wire),
@@ -225,100 +239,17 @@ soc_system soc_inst (
 );
 
 debounce debounce_inst (
-  .clk                                  (fpga_clk_50),
-  .reset_n                              (hps_fpga_reset_n),
-  .data_in                              (fpga_button_pio),
-  .data_out                             (fpga_debounced_buttons)
+  .clk      (fpga_clk_50),
+  .reset_n  (hps_fpga_reset_n),
+  .data_in  (fpga_button_pio),
+  .data_out (fpga_debounced_buttons)
 );
   defparam debounce_inst.WIDTH = 2;
   defparam debounce_inst.POLARITY = "LOW";
   defparam debounce_inst.TIMEOUT = 50000;
   defparam debounce_inst.TIMEOUT_WIDTH = 16;
 
-  // ---------- friend's 3-head card CNN (96x96 in, Q6.10) ----------
-  wire        core_done;
-  wire [3:0]  rank_idx;
-  wire [1:0]  suit_idx;
-  wire        is_joker;
-  wire signed [15:0] rank_score;
-
-  // core reset: hps_fpga_reset_n is asynchronous to fpga_clk_50 -> async assert, sync deassert
-  reg [1:0] rst_sync;
-  always @(posedge fpga_clk_50 or negedge hps_fpga_reset_n)
-    if (!hps_fpga_reset_n) rst_sync <= 2'b11;
-    else                   rst_sync <= {rst_sync[0], 1'b0};
-  wire core_rst = rst_sync[1];
-
-  // start: PIO level -> one-cycle pulse (the core samples start in its idle state)
-  reg cnn_start_d;
-  always @(posedge fpga_clk_50) cnn_start_d <= cnn_start_wire;
-  wire start_pulse = cnn_start_wire & ~cnn_start_d;
-
-  // colour flag: hardware detector (2-flop synced from the VGA domain) unless software overrides.
-  // Latched on start so it holds through the whole ~52 ms inference.
-  reg [1:0] col_sync, snap_done_sync;
-  always @(posedge fpga_clk_50) begin
-    col_sync       <= {col_sync[0],       snapshot_colour_w};
-    snap_done_sync <= {snap_done_sync[0], snapshot_done_w};
-  end
-  wire colour_sel = img_wr_ctrl_wire[2] ? img_wr_ctrl_wire[3] : col_sync[1];
-  reg  colour_lat;
-  always @(posedge fpga_clk_50) if (start_pulse) colour_lat <= colour_sel;
-
-  // the core's done is a 1-cycle pulse; software polls a sticky copy
-  reg done_sticky;
-  always @(posedge fpga_clk_50)
-    if (core_rst | start_pulse) done_sticky <= 1'b0;
-    else if (core_done)         done_sticky <= 1'b1;
-
-  card_cnn_core u_card_cnn (
-      .clk          (fpga_clk_50),
-      .rst          (core_rst),
-      .start        (start_pulse),
-      .img_wr_en    (img_wr_ctrl_wire[0]),
-      .img_wr_addr  (img_wr_addr_wire[11:0]),
-      .img_wr_data  (img_wr_data_wire),
-      .colour_flag  (colour_lat),
-      .rank_idx     (rank_idx),
-      .suit_idx     (suit_idx),
-      .is_joker     (is_joker),
-      .rank_score   (rank_score),
-      .done         (core_done)
-  );
-
-  assign cnn_result_wire = {rank_score, 6'b0, snap_done_sync[1], colour_lat, done_sticky, is_joker, suit_idx, rank_idx};
-
-  // ---------- 新增：例化摄像头模块 ----------
-  camera_capture u_camera (
-      .clk50               (fpga_clk_50),
-      .clk2_50             (FPGA_CLK2_50),
-      .rst_n               (hps_fpga_reset_n),
-      .capture_trigger_in  (camera_trigger_wire),
-
-      .HDMI_I2C_SCL(HDMI_I2C_SCL), .HDMI_I2C_SDA(HDMI_I2C_SDA),
-      .HDMI_I2S(HDMI_I2S), .HDMI_LRCLK(HDMI_LRCLK),
-      .HDMI_MCLK(HDMI_MCLK), .HDMI_SCLK(HDMI_SCLK),
-      .HDMI_TX_CLK(HDMI_TX_CLK), .HDMI_TX_DE(HDMI_TX_DE),
-      .HDMI_TX_D(HDMI_TX_D), .HDMI_TX_HS(HDMI_TX_HS),
-      .HDMI_TX_INT(HDMI_TX_INT), .HDMI_TX_VS(HDMI_TX_VS),
-
-      .CAMERA_I2C_SCL(CAMERA_I2C_SCL), .CAMERA_I2C_SDA(CAMERA_I2C_SDA),
-      .CAMERA_PWDN_n(CAMERA_PWDN_n), .MIPI_CS_n(MIPI_CS_n),
-      .MIPI_I2C_SCL(MIPI_I2C_SCL), .MIPI_I2C_SDA(MIPI_I2C_SDA),
-      .MIPI_MCLK(MIPI_MCLK), .MIPI_PIXEL_CLK(MIPI_PIXEL_CLK),
-      .MIPI_PIXEL_D(MIPI_PIXEL_D),
-      .MIPI_PIXEL_HS(MIPI_PIXEL_HS), .MIPI_PIXEL_VS(MIPI_PIXEL_VS),
-      .MIPI_REFCLK(MIPI_REFCLK), .MIPI_RESET_n(MIPI_RESET_n),
-
-      .dbg_mipi_release(dbg_mipi_rel), .dbg_camera_release(dbg_cam_rel),
-      .dbg_hdmi_ready(dbg_hdmi_rdy),   .dbg_pll_ok(dbg_pll_ok),
-      .dbg_lut_index(dbg_lut_index),   .dbg_ack(dbg_ack),
-      .dbg_ready_latched(dbg_ready_latched), .dbg_hdmi_int(dbg_hdmi_int),
-
-      .hps_rd_addr(snapshot_addr_wire),
-      .hps_rd_data(snapshot_data_wire),
-      .snapshot_done(snapshot_done_w),
-      .snapshot_colour(snapshot_colour_w)
-  );
+  // The card CNN accelerator needs no instantiation here -- it lives inside
+  // soc_system as an Avalon-MM slave on the lightweight bridge.
 
 endmodule

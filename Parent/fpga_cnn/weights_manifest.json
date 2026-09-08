@@ -1,77 +1,74 @@
 {
-  "checkpoint": "checkpoints_12\\last_dualhead_model.pt",
-  "checkpoint_sha256": "f611f86c146aeb25612f88385cf1f7befde31aaf9ea5a896b5e5a46e557e4e67",
+  "source": "handover_96_v2 (checkpoints_13), installed as delivered",
+  "checkpoint": "handover_96_v2/model/best_dualhead_model.pt",
+  "checkpoint_sha256": "573fed0044fb2275b909e6e41c4be3838c3a0ed33d996f0ce3a54f0c5a106047",
+  "architecture": "48x48 -> conv1 1->8 5x5 -> pool -> conv2 8->16 5x5 -> pool -> flatten 2304 + colour = 2305 -> fc_shared 64 -> fc_rank 13 | fc_suit 4 | fc_joker 2",
   "frac_bits": 10,
-  "fit_range": 16.0,
-  "layer_scales": {
-    "conv1": 1.0,
-    "conv2": 1.0,
-    "conv3": 0.5308390179658392,
-    "fc_shared": 0.10553052595178415
+  "format": "Q6.10, 16-bit two's complement, 4 hex digits per line",
+  "note": "No per-layer activation rescaling. The previous checkpoints_12 set was a 96x96 3-conv model with layer_scales and a conv3 stage; it does not apply to this network and conv3_*.hex were removed.",
+  "per_tensor_quant_scales": {
+    "conv1_w": 0.003161425430943647,
+    "conv1_b": 0.002420908822788028,
+    "conv2_w": 0.004044244139213261,
+    "conv2_b": 0.0008391043919277942,
+    "fc_shared_w": 0.00779497764241977,
+    "fc_shared_b": 0.00045388711132402496,
+    "fc_rank_w": 0.0027423059846472552,
+    "fc_rank_b": 0.000909962874697888,
+    "fc_suit_w": 0.001992634196919719,
+    "fc_suit_b": 0.0006888895992218978,
+    "fc_joker_w": 0.001601941003574161,
+    "fc_joker_b": 0.00035686714677360116
   },
-  "peak_activations_after_fit": {
-    "conv1": 2.4083566665649414,
-    "conv2": 4.546850204467773,
-    "conv3": 15.999987602233887,
-    "fc_shared": 16.0
-  },
-  "written": "2026-09-07 18:49:45",
+  "written": "2026-09-08 10:33:08",
   "files": {
     "conv1_w.hex": {
       "count": 200,
-      "md5": "7cee2f8fd16b566c255a20b49491364c"
+      "md5": "c5f2245b2ec2b9ffb37ee6d3ba256878"
     },
     "conv1_b.hex": {
       "count": 8,
-      "md5": "80b09584356edf31a1aeb9497d3e5860"
+      "md5": "bb91dcbc8e7e19fd616b48857c4c00df"
     },
     "conv2_w.hex": {
       "count": 3200,
-      "md5": "f6813b0a6e54bec29a95f7929221fc92"
+      "md5": "272db69c943096649d72c158a8ac4a18"
     },
     "conv2_b.hex": {
       "count": 16,
-      "md5": "28326714b649e5f77d3b2e6c04f4c96c"
-    },
-    "conv3_w.hex": {
-      "count": 6400,
-      "md5": "3623123622cc984009a0940e7db714e3"
-    },
-    "conv3_b.hex": {
-      "count": 16,
-      "md5": "5e4aea447e86d935df723df7fcdbf4be"
+      "md5": "ef23bd7462e8b7c19e2fee60e0ba1289"
     },
     "fcs_w.hex": {
       "count": 147520,
-      "md5": "bbcab94c6769d655947a39081deaa5f5"
+      "md5": "702976876bf0d1d2517e34b528927d35"
     },
     "fcs_b.hex": {
       "count": 64,
-      "md5": "7545bf2edcd0911ab5541891e5626eea"
+      "md5": "2a9b77695809c00df805bb97161ecfe6"
     },
     "fcrank_w.hex": {
       "count": 832,
-      "md5": "0c2fa4a9f9a953d0706b5c9ac911ac6d"
+      "md5": "08da1eeffabcbb0f83fd4f1a02722e69"
     },
     "fcrank_b.hex": {
       "count": 13,
-      "md5": "5a45bbcef8b6e38d9c86987e9f99c541"
+      "md5": "5459e12168d025919fe148501b1ff31a"
     },
     "fcsuit_w.hex": {
       "count": 256,
-      "md5": "1792ce3cd88f794ce584b7447490b943"
+      "md5": "d4e46bd49ffddadb55f4d6bbd21a447a"
     },
     "fcsuit_b.hex": {
       "count": 4,
-      "md5": "1d374983e72b5bb7eb98e1d2dc5ad4d1"
+      "md5": "ee685fdf1f25a51261c865a463619bb1"
     },
     "fcjoker_w.hex": {
       "count": 128,
-      "md5": "6fd8aaf6b4c6237e2d7fc045ee1a34f0"
+      "md5": "e1647a8bc2d73e61cc884dfea994c939"
     },
     "fcjoker_b.hex": {
       "count": 2,
-      "md5": "6a7ae3c1a7408eadff47d1af375051e0"
+      "md5": "5e79a8b408642448ef952d853bcdcab5"
     }
   }
 }

@@ -15,8 +15,19 @@
 #include <stdint.h>
 
 /* ---- image geometry and fixed point ------------------------------------ */
+/* IMG_* is the CAPTURE grid that downsample_96x96.v fills and the snapshot RAM
+ * hands back; the SNAP_* diagnostic addresses below sit just past it, so this
+ * has to keep tracking the hardware.
+ *
+ * MODEL_* is what the accelerator actually reads. The card_cnn_core in this
+ * build is the handover_96_v2 network: 48x48 in, two conv+pool stages. The
+ * capture stays 96x96 and upload_and_infer averages each 2x2 block on the way
+ * out -- see the note there. Keep the two apart: making IMG_DIM 48 would move
+ * every SNAP_* address and silently break the camera diagnostics. */
 #define IMG_DIM      96
 #define IMG_PIXELS   ( IMG_DIM * IMG_DIM )    /* 9216 */
+#define MODEL_DIM    48
+#define MODEL_PIXELS ( MODEL_DIM * MODEL_DIM )  /* 2304 */
 #define SUM_MAX      510u    /* 2 px * 255 (ITU-R 601 luminance of white) */
 #define Q_ONE        1024u   /* 1.0 in Q6.10 */
 
@@ -63,8 +74,9 @@ void read_snapshot( uint16_t * raw, unsigned * minv, unsigned * maxv );
  * FPGA access, which is what makes it safe to run on CPU1. */
 void preprocess( const uint16_t * raw, uint16_t * q );
 
-/* Upload the IMG_PIXELS pixels, start the CNN, poll for done. Returns the raw result
- * word, or 0 on timeout -- bit 7 is always set in a real result. */
+/* Average `q` down to MODEL_PIXELS, upload, start the CNN, poll for done.
+ * Returns the raw result word, or 0 on timeout -- bit 7 is always set in a real
+ * result. Takes the full IMG_PIXELS capture: the caller still works at 96x96. */
 unsigned upload_and_infer( const uint16_t * q, unsigned red_count );
 
 /* "3 of Hearts" / "JOKER", printed with a fixed field width. */

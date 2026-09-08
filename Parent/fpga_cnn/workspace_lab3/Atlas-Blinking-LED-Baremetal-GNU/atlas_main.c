@@ -34,7 +34,7 @@ int __auto_semihosting;
 
 #define IMG_WR_CTRL_PIO_BASE      (0xFF200000)   /* [0] wr_en, [2] colour override en, [3] colour override val */
 #define IMG_WR_DATA_PIO_BASE      (0xFF200010)   /* Q6.10 pixel */
-#define IMG_WR_ADDR_PIO_BASE      (0xFF200020)   /* 0..9215 = y*96 + x */
+#define IMG_WR_ADDR_PIO_BASE      (0xFF200020)   /* 0..2303 = y*48 + x (model grid, not the capture grid) */
 #define CAMERA_TRIGGER_PIO_BASE   (0xFF200030)
 #define SNAPSHOT_DATA_PIO_BASE    (0xFF200040)   /* raw 1x2 luminance sum; addr 9216 = red_count, 9217 = colour_hw */
 
@@ -233,9 +233,26 @@ unsigned upload_and_infer(const uint16_t *q, unsigned red_count)
     (void)red_count;
 #endif
 
-    for (i = 0; i < IMG_PIXELS; i++) {
+    /* 96x96 capture -> 48x48 model input, averaging each 2x2 block.
+     *
+     * The accelerator is the handover_96_v2 network, which takes 48x48. The
+     * hardware still captures 96x96 at the 1:2 cell aspect, so a plain 2x2 mean
+     * lands exactly on the "1:2 crop squashed square" the model was trained on
+     * -- no resampling, every output pixel backed by four real samples. This is
+     * what board/snapshot_to_accel.c does in the handover bundle; done here on
+     * the Q6.10 values instead of the raw sums, which is equivalent (the scale
+     * is linear) and keeps INVERT / NORMALIZE_MINMAX applied first.
+     *
+     * The rounding term matters: truncating four times per pixel biases the
+     * whole image dark by up to 1.5 LSB, and the network is sensitive to it. */
+    for (i = 0; i < MODEL_PIXELS; i++) {
+        unsigned oy = (unsigned)i / MODEL_DIM;
+        unsigned ox = (unsigned)i % MODEL_DIM;
+        const uint16_t *p = &q[(oy * 2u) * IMG_DIM + (ox * 2u)];
+        unsigned avg = ((unsigned)p[0] + p[1] + p[IMG_DIM] + p[IMG_DIM + 1] + 2u) >> 2;
+
         alt_write_word(IMG_WR_ADDR_PIO_BASE, (unsigned)i);
-        alt_write_word(IMG_WR_DATA_PIO_BASE, q[i]);
+        alt_write_word(IMG_WR_DATA_PIO_BASE, avg);
         alt_write_word(IMG_WR_CTRL_PIO_BASE, ctrl_base | 0x1u);   /* wr_en high for >= 1 clock */
         alt_write_word(IMG_WR_CTRL_PIO_BASE, ctrl_base);
     }
