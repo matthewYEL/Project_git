@@ -1,13 +1,12 @@
-23:20:39 **** Incremental Build of configuration Default for project Atlas-Blinking-LED-Baremetal-GNU ****
+13:02:29 **** Build of configuration Default for project Atlas-Blinking-LED-Baremetal-GNU ****
 make all 
-make[1]: Entering directory 'C:/Users/mattb/Downloads/LAB_5_cnn_96/LAB_5/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
+make[1]: Entering directory 'C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
 make[1]: Nothing to be done for 'copy_hwlib'.
 make[1]: 'objs_GNU_CYCLONEV' is up to date.
-make[1]: Leaving directory 'C:/Users/mattb/Downloads/LAB_5_cnn_96/LAB_5/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
-make[1]: Entering directory 'C:/Users/mattb/Downloads/LAB_5_cnn_96/LAB_5/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
-arm-eabi-g++ -Thwlib/src/linkerscripts/cvav-ddr.ld -mcpu=cortex-a9 -mfloat-abi=softfp -mfpu=neon -Wl,--gc-sections -Xlinker --require-defined=__auto_semihosting objs_GNU_CYCLONEV/alt_clock_manager.o objs_GNU_CYCLONEV/alt_base.o objs_GNU_CYCLONEV/atlas_main.o objs_GNU_CYCLONEV/app_rtos.o objs_GNU_CYCLONEV/a9_startup.o objs_GNU_CYCLONEV/amp.o objs_GNU_CYCLONEV/tasks.o objs_GNU_CYCLONEV/queue.o objs_GNU_CYCLONEV/list.o objs_GNU_CYCLONEV/timers.o objs_GNU_CYCLONEV/port.o objs_GNU_CYCLONEV/heap_4.o objs_GNU_CYCLONEV/freertos_portasm.o -o atlas_main.axf
-arm-eabi-objdump -DS atlas_main.axf > atlas_main.axf.objdump
-make[1]: Leaving directory 'C:/Users/mattb/Downloads/LAB_5_cnn_96/LAB_5/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
+make[1]: Leaving directory 'C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
+make[1]: Entering directory 'C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
+make[1]: 'atlas_main.axf' is up to date.
+make[1]: Leaving directory 'C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU'
 
-23:20:45 Build Finished. 0 errors, 0 warnings. (took 5s.621ms)
+13:02:30 Build Finished. 0 errors, 0 warnings. (took 1s.71ms)
 

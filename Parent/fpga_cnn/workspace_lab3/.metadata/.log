@@ -8133,3 +8133,658 @@ java.lang.NullPointerException: Cannot invoke "org.eclipse.e4.core.contexts.IEcl
 	at org.eclipse.equinox.launcher.Main.invokeFramework(Main.java:615)
 	at org.eclipse.equinox.launcher.Main.basicRun(Main.java:563)
 	at org.eclipse.equinox.launcher.Main.run(Main.java:1415)
+!SESSION 2026-09-08 12:39:35.009 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.1
+java.vendor=Microsoft
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en_MY
+Command-line arguments:  -os win32 -ws win32 -arch x86_64 -data C:\Users\mattb\Desktop\ECE4813\Project_git\Parent\fpga_cnn\workspace_lab3
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:40:53.205
+!MESSAGE Unable to load one or more images
+!STACK 0
+java.util.concurrent.ExecutionException: com.arm.debug.interpreter.ds.DSException: Failed to load "hello.axf"
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:191)
+	at com.arm.debug.control.CommandTask.get(CommandTask.java:194)
+	at com.arm.debug.api.Commands.loadFileAndWait(Commands.java:276)
+	at com.arm.debug.control.ConnectionController.doPostDebugServiceInitialization(ConnectionController.java:1411)
+	at com.arm.debug.control.ConnectionController.manageDebugServiceAndInitialize(ConnectionController.java:1217)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:649)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at com.arm.debug.control.VariableResolvingLaunchConfiguration.launch(VariableResolvingLaunchConfiguration.java:274)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin$1.run(DebugUIPlugin.java:1254)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+Caused by: com.arm.debug.interpreter.ds.DSException: Failed to load "hello.axf"
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:84)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+	at com.arm.debug.control.CommandTask.fillInStackTrace(CommandTask.java:78)
+	at com.arm.debug.control.ConnectionController.execute(ConnectionController.java:1972)
+	at com.arm.debug.api.AbstractCommands.execute(AbstractCommands.java:115)
+	at com.arm.debug.api.Commands.loadFile(Commands.java:266)
+	... 15 more
+Caused by: com.arm.debug.core.interfaces.memory.MemoryException: Failed to write 8 bytes to address S:0xFFFF3B28
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:488)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:430)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:419)
+	at com.arm.debug.core.engine.memory.ops.WriteOp.performOp(WriteOp.java:53)
+	at com.arm.debug.core.engine.memory.ops.MemoryOperation.visitRange(MemoryOperation.java:44)
+	at com.arm.debug.core.engine.memory.MemoryAccess.writeMemory(MemoryAccess.java:212)
+	at com.arm.debug.core.engine.image.ImageControl.downloadImageToBoard(ImageControl.java:875)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:720)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:362)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:257)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.tryExecute(LoadCommand.java:104)
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:73)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+Caused by: com.arm.debug.dtsl.nativelayer.NativeException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:191)
+	at com.arm.debug.dtsl.components.Device$MemoryAccessWrapper.memWrite(Device.java:145)
+	at com.arm.debug.dtsl.components.Device.memWrite(Device.java:519)
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:467)
+	... 19 more
+Caused by: com.arm.rddi.RDDIException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.rddi.RDDI.checkResult(RDDI.java:2223)
+	at com.arm.rddi.RDDI$Debug.memWrite(RDDI.java:411)
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:189)
+	... 22 more
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:40:53.209
+!MESSAGE Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+!STACK 0
+com.arm.debug.interpreter.ds.DSException: Failed to load "hello.axf"
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:84)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+	at com.arm.debug.control.CommandTask.fillInStackTrace(CommandTask.java:78)
+	at com.arm.debug.control.ConnectionController.execute(ConnectionController.java:1972)
+	at com.arm.debug.api.AbstractCommands.execute(AbstractCommands.java:115)
+	at com.arm.debug.api.Commands.loadFile(Commands.java:266)
+	at com.arm.debug.api.Commands.loadFileAndWait(Commands.java:276)
+	at com.arm.debug.control.ConnectionController.doPostDebugServiceInitialization(ConnectionController.java:1411)
+	at com.arm.debug.control.ConnectionController.manageDebugServiceAndInitialize(ConnectionController.java:1217)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:649)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at com.arm.debug.control.VariableResolvingLaunchConfiguration.launch(VariableResolvingLaunchConfiguration.java:274)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin$1.run(DebugUIPlugin.java:1254)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+Caused by: com.arm.debug.core.interfaces.memory.MemoryException: Failed to write 8 bytes to address S:0xFFFF3B28
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:488)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:430)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:419)
+	at com.arm.debug.core.engine.memory.ops.WriteOp.performOp(WriteOp.java:53)
+	at com.arm.debug.core.engine.memory.ops.MemoryOperation.visitRange(MemoryOperation.java:44)
+	at com.arm.debug.core.engine.memory.MemoryAccess.writeMemory(MemoryAccess.java:212)
+	at com.arm.debug.core.engine.image.ImageControl.downloadImageToBoard(ImageControl.java:875)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:720)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:362)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:257)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.tryExecute(LoadCommand.java:104)
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:73)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+Caused by: com.arm.debug.dtsl.nativelayer.NativeException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:191)
+	at com.arm.debug.dtsl.components.Device$MemoryAccessWrapper.memWrite(Device.java:145)
+	at com.arm.debug.dtsl.components.Device.memWrite(Device.java:519)
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:467)
+	... 19 more
+Caused by: com.arm.rddi.RDDIException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.rddi.RDDI.checkResult(RDDI.java:2223)
+	at com.arm.rddi.RDDI$Debug.memWrite(RDDI.java:411)
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:189)
+	... 22 more
+Asynchronously called from thread Worker-14: executing debug commands
+	at com.arm.debug.service.proxy.SingleThreader.execute(SingleThreader.java:148)
+	at com.arm.debug.service.proxy.DebugServiceWrapper.invoke(DebugServiceWrapper.java:77)
+	at jdk.proxy17/jdk.proxy17.$Proxy94.loadfile(Unknown Source)
+	at com.arm.debug.api.commands.LoadFile.execute(LoadFile.java:26)
+	at com.arm.debug.api.commands.LoadFile.execute(LoadFile.java:1)
+	at com.arm.debug.api.AbstractDebugCommand.call(AbstractDebugCommand.java:50)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at com.arm.debug.control.CommandTask.run(CommandTask.java:53)
+	at com.arm.debug.control.ConnectionController$7.run(ConnectionController.java:2096)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:40:53.994
+!MESSAGE Configuration for connection type 'Bare Metal Debug' is not valid - Connection cannot be empty.
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:40:54.006
+!MESSAGE Unable to connect to Atlas-Blinking-LED-Baremetal-Debug. Launch configuration has errors
+!STACK 0
+com.arm.debug.control.LaunchException: Configuration for connection type 'Bare Metal Debug' is not valid - Connection cannot be empty.
+	at com.arm.debug.control.ConnectionController.validateConfigAgainstLauncherPanel(ConnectionController.java:717)
+	at com.arm.debug.control.ConnectionController.doPreDebugServiceInitialization(ConnectionController.java:726)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:638)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at com.arm.debug.control.VariableResolvingLaunchConfiguration.launch(VariableResolvingLaunchConfiguration.java:274)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.lambda$5(DebugUIPlugin.java:1132)
+	at org.eclipse.jface.operation.ModalContext$ModalContextThread.run(ModalContext.java:123)
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:41:02.042
+!MESSAGE NameError: global name 'Timeout' is not defined
+!STACK 0
+com.arm.debug.launch.script.ScriptException: Error running shutdown hook: global name 'Timeout' is not defined
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:49)
+	at com.arm.debug.control.target.AbstractTargetController.teardownTarget(AbstractTargetController.java:274)
+	at com.arm.debug.control.ConnectionController.doTargetTeardown(ConnectionController.java:1927)
+	at com.arm.debug.control.ConnectionController.connectionClosed(ConnectionController.java:1889)
+	at com.arm.debug.control.ConnectionController.connectionCleanup(ConnectionController.java:2571)
+	at com.arm.debug.control.ConnectionController$8.run(ConnectionController.java:2357)
+	at com.arm.commons.eclipse.utility.task.Task.run(Task.java:141)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: Traceback (most recent call last):
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 284, in shutdown
+    self.doShutdown(memo.serverProc)
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 295, in doShutdown
+    serverProc.wait(3000)
+NameError: global name 'Timeout' is not defined
+
+	at org.python.core.Py.NameError(Py.java:259)
+	at org.python.core.PyFrame.getglobal(PyFrame.java:265)
+	at rddi_dap_debug_server$py.doShutdown$21(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:298)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:150)
+	at org.python.core.PyFunction.__call__(PyFunction.java:426)
+	at org.python.core.PyMethod.__call__(PyMethod.java:141)
+	at rddi_dap_debug_server$py.shutdown$20(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:284)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:134)
+	at org.python.core.PyFunction.__call__(PyFunction.java:416)
+	at org.python.core.PyMethod.__call__(PyMethod.java:126)
+	at org.python.core.PyMethod.__call__(PyMethod.java:117)
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:47)
+	... 9 more
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:41:06.307
+!MESSAGE Configuration for connection type 'Bare Metal Debug' is not valid - Connection cannot be empty.
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:41:06.312
+!MESSAGE Unable to connect to Atlas-Blinking-LED-Baremetal-Debug. Launch configuration has errors
+!STACK 0
+com.arm.debug.control.LaunchException: Configuration for connection type 'Bare Metal Debug' is not valid - Connection cannot be empty.
+	at com.arm.debug.control.ConnectionController.validateConfigAgainstLauncherPanel(ConnectionController.java:717)
+	at com.arm.debug.control.ConnectionController.doPreDebugServiceInitialization(ConnectionController.java:726)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:638)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at com.arm.debug.control.VariableResolvingLaunchConfiguration.launch(VariableResolvingLaunchConfiguration.java:274)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.lambda$5(DebugUIPlugin.java:1132)
+	at org.eclipse.jface.operation.ModalContext$ModalContextThread.run(ModalContext.java:123)
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:42:13.902
+!MESSAGE Unable to connect to Atlas-Blinking-LED-Baremetal-Debug. The script file ( altera_debug_server.py ) failed during execution:
+Port 3010 is already in use
+
+See Target Console view for more details
+!STACK 0
+com.arm.debug.control.LaunchException: The script file ( altera_debug_server.py ) failed during execution:
+Port 3010 is already in use
+
+See Target Console view for more details
+	at com.arm.debug.control.target.AbstractTargetController.runSetupScript(AbstractTargetController.java:264)
+	at com.arm.debug.control.target.AbstractTargetController.setupTarget(AbstractTargetController.java:75)
+	at com.arm.debug.control.ConnectionController.doPreDebugServiceInitialization(ConnectionController.java:755)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:638)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.lambda$5(DebugUIPlugin.java:1132)
+	at org.eclipse.jface.operation.ModalContext$ModalContextThread.run(ModalContext.java:123)
+Caused by: com.arm.debug.launch.script.ScriptException: The script file ( altera_debug_server.py ) failed during execution:
+Port 3010 is already in use
+	at com.arm.debug.launch.script.PythonScriptRunner.run(PythonScriptRunner.java:102)
+	at com.arm.debug.launch.script.TargetControlScriptRunner.run(TargetControlScriptRunner.java:32)
+	at com.arm.debug.control.target.AbstractTargetController.runSetupScript(AbstractTargetController.java:261)
+	... 13 more
+Caused by: Traceback (most recent call last):
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\altera_debug_server.py", line 48, in <module>
+    startDebugServer(configFile, rddidapBaseName, timeout)
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 304, in startDebugServer
+    launcher.launch()
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 105, in launch
+    serverProc = self.doLaunch()
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 137, in doLaunch
+    raise RuntimeError, 'Port 3010 is already in use'
+RuntimeError: Port 3010 is already in use
+
+	at org.python.core.PyException.doRaise(PyException.java:211)
+	at org.python.core.Py.makeException(Py.java:1693)
+	at org.python.core.Py.makeException(Py.java:1697)
+	at rddi_dap_debug_server$py.doLaunch$13(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:196)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:134)
+	at org.python.core.PyFunction.__call__(PyFunction.java:416)
+	at org.python.core.PyMethod.__call__(PyMethod.java:126)
+	at rddi_dap_debug_server$py.launch$12(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:111)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:134)
+	at org.python.core.PyFunction.__call__(PyFunction.java:416)
+	at org.python.core.PyMethod.__call__(PyMethod.java:126)
+	at rddi_dap_debug_server$py.startDebugServer$22(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:307)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:306)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:158)
+	at org.python.core.PyFunction.__call__(PyFunction.java:437)
+	at org.python.pycode._pyx9.f$0(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/altera_debug_server.py:48)
+	at org.python.pycode._pyx9.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/altera_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyCode.call(PyCode.java:18)
+	at org.python.core.Py.runCode(Py.java:1742)
+	at org.python.core.__builtin__.execfile_flags(__builtin__.java:535)
+	at org.python.util.PythonInterpreter.execfile(PythonInterpreter.java:287)
+	at com.arm.jython.Jython.runScript(Jython.java:81)
+	at com.arm.jython.Jython.runScript(Jython.java:94)
+	at com.arm.debug.launch.script.PythonScriptRunner.run(PythonScriptRunner.java:91)
+	... 15 more
+!SESSION 2026-09-08 12:44:18.525 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.1
+java.vendor=Microsoft
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en_MY
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:44:56.105
+!MESSAGE Unable to load one or more images
+!STACK 0
+java.util.concurrent.ExecutionException: com.arm.debug.interpreter.ds.DSException: Failed to load "hello.axf"
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:191)
+	at com.arm.debug.control.CommandTask.get(CommandTask.java:194)
+	at com.arm.debug.api.Commands.loadFileAndWait(Commands.java:276)
+	at com.arm.debug.control.ConnectionController.doPostDebugServiceInitialization(ConnectionController.java:1411)
+	at com.arm.debug.control.ConnectionController.manageDebugServiceAndInitialize(ConnectionController.java:1217)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:649)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at com.arm.debug.control.VariableResolvingLaunchConfiguration.launch(VariableResolvingLaunchConfiguration.java:274)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin$1.run(DebugUIPlugin.java:1254)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+Caused by: com.arm.debug.interpreter.ds.DSException: Failed to load "hello.axf"
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:84)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+	at com.arm.debug.control.CommandTask.fillInStackTrace(CommandTask.java:78)
+	at com.arm.debug.control.ConnectionController.execute(ConnectionController.java:1972)
+	at com.arm.debug.api.AbstractCommands.execute(AbstractCommands.java:115)
+	at com.arm.debug.api.Commands.loadFile(Commands.java:266)
+	... 15 more
+Caused by: com.arm.debug.core.interfaces.memory.MemoryException: Failed to write 8 bytes to address S:0xFFFF3B28
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:488)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:430)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:419)
+	at com.arm.debug.core.engine.memory.ops.WriteOp.performOp(WriteOp.java:53)
+	at com.arm.debug.core.engine.memory.ops.MemoryOperation.visitRange(MemoryOperation.java:44)
+	at com.arm.debug.core.engine.memory.MemoryAccess.writeMemory(MemoryAccess.java:212)
+	at com.arm.debug.core.engine.image.ImageControl.downloadImageToBoard(ImageControl.java:875)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:720)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:362)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:257)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.tryExecute(LoadCommand.java:104)
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:73)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+Caused by: com.arm.debug.dtsl.nativelayer.NativeException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:191)
+	at com.arm.debug.dtsl.components.Device$MemoryAccessWrapper.memWrite(Device.java:145)
+	at com.arm.debug.dtsl.components.Device.memWrite(Device.java:519)
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:467)
+	... 19 more
+Caused by: com.arm.rddi.RDDIException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.rddi.RDDI.checkResult(RDDI.java:2223)
+	at com.arm.rddi.RDDI$Debug.memWrite(RDDI.java:411)
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:189)
+	... 22 more
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:44:56.108
+!MESSAGE Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+!STACK 0
+com.arm.debug.interpreter.ds.DSException: Failed to load "hello.axf"
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:84)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+	at com.arm.debug.control.CommandTask.fillInStackTrace(CommandTask.java:78)
+	at com.arm.debug.control.ConnectionController.execute(ConnectionController.java:1972)
+	at com.arm.debug.api.AbstractCommands.execute(AbstractCommands.java:115)
+	at com.arm.debug.api.Commands.loadFile(Commands.java:266)
+	at com.arm.debug.api.Commands.loadFileAndWait(Commands.java:276)
+	at com.arm.debug.control.ConnectionController.doPostDebugServiceInitialization(ConnectionController.java:1411)
+	at com.arm.debug.control.ConnectionController.manageDebugServiceAndInitialize(ConnectionController.java:1217)
+	at com.arm.debug.control.ConnectionController.doInitialize(ConnectionController.java:649)
+	at com.arm.debug.control.ConnectionController.manageThreadModelAndInitialize(ConnectionController.java:591)
+	at com.arm.debug.control.ConnectionController.manageProgressResourceAndInitialize(ConnectionController.java:535)
+	at com.arm.debug.control.ConnectionController.initialize(ConnectionController.java:459)
+	at com.arm.debug.control.ConnectionManager.createConnection(ConnectionManager.java:284)
+	at com.arm.debug.launcher.TargetLauncher.launch(TargetLauncher.java:23)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:778)
+	at org.eclipse.debug.internal.core.LaunchConfiguration.launch(LaunchConfiguration.java:689)
+	at com.arm.debug.control.VariableResolvingLaunchConfiguration.launch(VariableResolvingLaunchConfiguration.java:274)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin.buildAndLaunch(DebugUIPlugin.java:1052)
+	at org.eclipse.debug.internal.ui.DebugUIPlugin$1.run(DebugUIPlugin.java:1254)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+Caused by: com.arm.debug.core.interfaces.memory.MemoryException: Failed to write 8 bytes to address S:0xFFFF3B28
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:488)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:430)
+	at com.arm.debug.targetaccess.device.MemoryAccess.writeMemory(MemoryAccess.java:419)
+	at com.arm.debug.core.engine.memory.ops.WriteOp.performOp(WriteOp.java:53)
+	at com.arm.debug.core.engine.memory.ops.MemoryOperation.visitRange(MemoryOperation.java:44)
+	at com.arm.debug.core.engine.memory.MemoryAccess.writeMemory(MemoryAccess.java:212)
+	at com.arm.debug.core.engine.image.ImageControl.downloadImageToBoard(ImageControl.java:875)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:720)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:362)
+	at com.arm.debug.core.engine.image.ImageControl.loadImage(ImageControl.java:257)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.tryExecute(LoadCommand.java:104)
+	at com.arm.debug.interpreter.ds.commands.file.AbstractFileCommand.executeOrUnload(AbstractFileCommand.java:73)
+	at com.arm.debug.interpreter.ds.commands.file.LoadCommand.execute(LoadCommand.java:48)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:88)
+	at com.arm.debug.interpreter.ds.commands.file.LoadFileCommand.execute(LoadFileCommand.java:1)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:373)
+	at com.arm.debug.interpreter.ds.DSInterpreter$3.run(DSInterpreter.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$QueuedTask.run(ConnectionEventManager.java:94)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processTask(ConnectionEventManager.java:305)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:208)
+Caused by: com.arm.debug.dtsl.nativelayer.NativeException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:191)
+	at com.arm.debug.dtsl.components.Device$MemoryAccessWrapper.memWrite(Device.java:145)
+	at com.arm.debug.dtsl.components.Device.memWrite(Device.java:519)
+	at com.arm.debug.targetaccess.device.MemoryAccess.doWriteMemory(MemoryAccess.java:467)
+	... 19 more
+Caused by: com.arm.rddi.RDDIException: Memory access caused precise abort.
+Debug Precise Abort Registers : DFSR = 0x00000817, DFAR = 0xFFFF3B20
+	at com.arm.rddi.RDDI.checkResult(RDDI.java:2223)
+	at com.arm.rddi.RDDI$Debug.memWrite(RDDI.java:411)
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memWrite(AddressFilterAdapter.java:189)
+	... 22 more
+Asynchronously called from thread Worker-3: executing debug commands
+	at com.arm.debug.service.proxy.SingleThreader.execute(SingleThreader.java:148)
+	at com.arm.debug.service.proxy.DebugServiceWrapper.invoke(DebugServiceWrapper.java:77)
+	at jdk.proxy14/jdk.proxy14.$Proxy82.loadfile(Unknown Source)
+	at com.arm.debug.api.commands.LoadFile.execute(LoadFile.java:26)
+	at com.arm.debug.api.commands.LoadFile.execute(LoadFile.java:1)
+	at com.arm.debug.api.AbstractDebugCommand.call(AbstractDebugCommand.java:50)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at com.arm.debug.control.CommandTask.run(CommandTask.java:53)
+	at com.arm.debug.control.ConnectionController$7.run(ConnectionController.java:2096)
+	at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:44:58.033
+!MESSAGE NameError: global name 'Timeout' is not defined
+!STACK 0
+com.arm.debug.launch.script.ScriptException: Error running shutdown hook: global name 'Timeout' is not defined
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:49)
+	at com.arm.debug.control.target.AbstractTargetController.teardownTarget(AbstractTargetController.java:274)
+	at com.arm.debug.control.ConnectionController.doTargetTeardown(ConnectionController.java:1927)
+	at com.arm.debug.control.ConnectionController.connectionClosed(ConnectionController.java:1889)
+	at com.arm.debug.control.ConnectionController.connectionCleanup(ConnectionController.java:2571)
+	at com.arm.debug.control.ConnectionController$8.run(ConnectionController.java:2357)
+	at com.arm.commons.eclipse.utility.task.Task.run(Task.java:141)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: Traceback (most recent call last):
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 284, in shutdown
+    self.doShutdown(memo.serverProc)
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 295, in doShutdown
+    serverProc.wait(3000)
+NameError: global name 'Timeout' is not defined
+
+	at org.python.core.Py.NameError(Py.java:259)
+	at org.python.core.PyFrame.getglobal(PyFrame.java:265)
+	at rddi_dap_debug_server$py.doShutdown$21(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:298)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:150)
+	at org.python.core.PyFunction.__call__(PyFunction.java:426)
+	at org.python.core.PyMethod.__call__(PyMethod.java:141)
+	at rddi_dap_debug_server$py.shutdown$20(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:284)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:134)
+	at org.python.core.PyFunction.__call__(PyFunction.java:416)
+	at org.python.core.PyMethod.__call__(PyMethod.java:126)
+	at org.python.core.PyMethod.__call__(PyMethod.java:117)
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:47)
+	... 9 more
+
+!ENTRY org.eclipse.core.jobs 2 2 2026-09-08 12:45:07.181
+!MESSAGE Job found still running after platform shutdown.  Jobs should be canceled by the plugin that scheduled them during shutdown: org.python.pydev.ast.codecompletion.revisited.SyncSystemModulesManagerScheduler$SynchJob RUNNING
+	 at java.base/java.lang.ProcessImpl.waitForInterruptibly(Native Method)
+	 at java.base/java.lang.ProcessImpl.waitFor(ProcessImpl.java:569)
+	 at org.python.pydev.shared_core.process.ProcessUtils.getProcessOutput(ProcessUtils.java:69)
+	 at org.python.pydev.ast.runners.SimpleRunner.getProcessOutput(SimpleRunner.java:343)
+	 at org.python.pydev.ast.runners.SimpleRunner.runAndGetOutput(SimpleRunner.java:332)
+	 at org.python.pydev.ast.runners.SimpleJythonRunner.runAndGetOutputWithJar(SimpleJythonRunner.java:100)
+	 at org.python.pydev.ast.runners.SimpleJythonRunner.runAndGetOutputWithJar(SimpleJythonRunner.java:65)
+	 at org.python.pydev.ast.interpreter_managers.JythonInterpreterManager.doCreateInterpreterInfo(JythonInterpreterManager.java:74)
+	 at org.python.pydev.ast.interpreter_managers.JythonInterpreterManager.internalCreateInterpreterInfo(JythonInterpreterManager.java:46)
+	 at org.python.pydev.ast.interpreter_managers.AbstractInterpreterManager.createInterpreterInfo(AbstractInterpreterManager.java:332)
+	 at org.python.pydev.ast.codecompletion.revisited.SyncSystemModulesManager$CreateInterpreterInfoCallback.createInterpreterInfo(SyncSystemModulesManager.java:172)
+	 at org.python.pydev.ast.codecompletion.revisited.SyncSystemModulesManager.updateStructures(SyncSystemModulesManager.java:278)
+	 at org.python.pydev.ast.codecompletion.revisited.SyncSystemModulesManagerScheduler$SynchJob.run(SyncSystemModulesManagerScheduler.java:234)
+	 at org.eclipse.core.internal.jobs.Worker.run(Worker.java:63)
+!SESSION 2026-09-08 12:45:33.209 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.1
+java.vendor=Microsoft
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en_MY
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 12:48:06.472
+!MESSAGE NameError: global name 'Timeout' is not defined
+!STACK 0
+com.arm.debug.launch.script.ScriptException: Error running shutdown hook: global name 'Timeout' is not defined
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:49)
+	at com.arm.debug.control.target.AbstractTargetController.teardownTarget(AbstractTargetController.java:274)
+	at com.arm.debug.control.ConnectionController.doTargetTeardown(ConnectionController.java:1927)
+	at com.arm.debug.control.ConnectionController.connectionClosed(ConnectionController.java:1889)
+	at com.arm.debug.control.ConnectionController.connectionCleanup(ConnectionController.java:2571)
+	at com.arm.debug.control.ConnectionController$8.run(ConnectionController.java:2357)
+	at com.arm.commons.eclipse.utility.task.Task.run(Task.java:141)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: Traceback (most recent call last):
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 284, in shutdown
+    self.doShutdown(memo.serverProc)
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 295, in doShutdown
+    serverProc.wait(3000)
+NameError: global name 'Timeout' is not defined
+
+	at org.python.core.Py.NameError(Py.java:259)
+	at org.python.core.PyFrame.getglobal(PyFrame.java:265)
+	at rddi_dap_debug_server$py.doShutdown$21(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:298)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:150)
+	at org.python.core.PyFunction.__call__(PyFunction.java:426)
+	at org.python.core.PyMethod.__call__(PyMethod.java:141)
+	at rddi_dap_debug_server$py.shutdown$20(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:284)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:134)
+	at org.python.core.PyFunction.__call__(PyFunction.java:416)
+	at org.python.core.PyMethod.__call__(PyMethod.java:126)
+	at org.python.core.PyMethod.__call__(PyMethod.java:117)
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:47)
+	... 9 more
+!SESSION 2026-09-08 13:02:04.160 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.1
+java.vendor=Microsoft
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en_MY
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 13:04:03.862
+!MESSAGE Failed to read 4 bytes from address S:0x00145324
+!STACK 0
+com.arm.debug.core.interfaces.memory.MemoryException: Failed to read 4 bytes from address S:0x00145324
+	at com.arm.debug.targetaccess.device.MemoryAccess.readMemoryFromCore(MemoryAccess.java:274)
+	at com.arm.debug.targetaccess.device.MemoryAccess.readMemory(MemoryAccess.java:212)
+	at com.arm.debug.core.engine.memory.MemoryCacheAccess.readMemoryFromUnderlyingHandler(MemoryCacheAccess.java:431)
+	at com.arm.debug.core.engine.memory.MemoryCacheAccess.readMemory(MemoryCacheAccess.java:182)
+	at com.arm.debug.core.engine.memory.ops.ReadOp.performOp(ReadOp.java:41)
+	at com.arm.debug.core.engine.memory.ops.MemoryOperation.visitRange(MemoryOperation.java:44)
+	at com.arm.debug.core.engine.memory.MemoryAccess.readMemory(MemoryAccess.java:106)
+	at com.arm.debug.core.engine.memory.BaseMemoryAccess.readMemory(BaseMemoryAccess.java:42)
+	at com.arm.debug.core.engine.memory.BaseMemoryAccess.readMemory32(BaseMemoryAccess.java:76)
+	at com.arm.debug.core.engine.memory.BaseMemoryAccess.readMemory32(BaseMemoryAccess.java:70)
+	at com.arm.debug.os.baremetal.semihosting.SemihostingMarshaller.readWord(SemihostingMarshaller.java:102)
+	at com.arm.debug.os.baremetal.semihosting.SemihostingMarshaller.getParameters(SemihostingMarshaller.java:64)
+	at com.arm.debug.os.baremetal.semihosting.commands.SysWriteCommand.execute(SysWriteCommand.java:28)
+	at com.arm.debug.os.baremetal.semihosting.commands.CommandHandler.execute(CommandHandler.java:40)
+	at com.arm.debug.os.baremetal.semihosting.SemihostingFilter.executeCommand(SemihostingFilter.java:134)
+	at com.arm.debug.os.baremetal.semihosting.SemihostingFilter.handleStoppedEvent(SemihostingFilter.java:90)
+	at com.arm.debug.os.baremetal.semihosting.SemihostingFilter.filterStatus(SemihostingFilter.java:164)
+	at com.arm.debug.core.engine.connection.runcontrol.ExecutionStateChangedHandler.getSuppressedEvents(ExecutionStateChangedHandler.java:610)
+	at com.arm.debug.core.engine.connection.runcontrol.ExecutionStateChangedHandler.handleEvent(ExecutionStateChangedHandler.java:244)
+	at com.arm.debug.core.engine.connection.runcontrol.ExecutionStateChangedHandler.handleEvent(ExecutionStateChangedHandler.java:1)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager.processEvent(ConnectionEventManager.java:352)
+	at com.arm.debug.core.engine.connection.ConnectionEventManager$2.run(ConnectionEventManager.java:206)
+Caused by: com.arm.debug.dtsl.nativelayer.NativeException: Cannot attain state requested.
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memRead(AddressFilterAdapter.java:202)
+	at com.arm.debug.dtsl.components.Device$MemoryAccessWrapper.memRead(Device.java:151)
+	at com.arm.debug.dtsl.components.Device.memRead(Device.java:532)
+	at com.arm.debug.targetaccess.device.MemoryAccess.readMemoryFromCore(MemoryAccess.java:256)
+	... 21 more
+Caused by: com.arm.rddi.RDDIException: Cannot attain state requested.
+	at com.arm.rddi.RDDI.checkResult(RDDI.java:2223)
+	at com.arm.rddi.RDDI$Debug.memRead(RDDI.java:425)
+	at com.arm.debug.dtsl.components.AddressFilterAdapter$1.memRead(AddressFilterAdapter.java:200)
+	... 24 more
+
+!ENTRY com.arm.debugger.ux 4 0 2026-09-08 13:04:42.582
+!MESSAGE NameError: global name 'Timeout' is not defined
+!STACK 0
+com.arm.debug.launch.script.ScriptException: Error running shutdown hook: global name 'Timeout' is not defined
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:49)
+	at com.arm.debug.control.target.AbstractTargetController.teardownTarget(AbstractTargetController.java:274)
+	at com.arm.debug.control.ConnectionController.doTargetTeardown(ConnectionController.java:1927)
+	at com.arm.debug.control.ConnectionController.connectionClosed(ConnectionController.java:1889)
+	at com.arm.debug.control.ConnectionController.connectionCleanup(ConnectionController.java:2571)
+	at com.arm.debug.control.ConnectionController$8.run(ConnectionController.java:2357)
+	at com.arm.commons.eclipse.utility.task.Task.run(Task.java:141)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: Traceback (most recent call last):
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 284, in shutdown
+    self.doShutdown(memo.serverProc)
+  File "C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\rddi_dap_debug_server.py", line 295, in doShutdown
+    serverProc.wait(3000)
+NameError: global name 'Timeout' is not defined
+
+	at org.python.core.Py.NameError(Py.java:259)
+	at org.python.core.PyFrame.getglobal(PyFrame.java:265)
+	at rddi_dap_debug_server$py.doShutdown$21(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:298)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:150)
+	at org.python.core.PyFunction.__call__(PyFunction.java:426)
+	at org.python.core.PyMethod.__call__(PyMethod.java:141)
+	at rddi_dap_debug_server$py.shutdown$20(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py:284)
+	at rddi_dap_debug_server$py.call_function(C:/Program Files/Arm/Development Studio 2026.0-1/sw/debugger/configdb/Scripts/rddi_dap_debug_server.py)
+	at org.python.core.PyTableCode.call(PyTableCode.java:173)
+	at org.python.core.PyBaseCode.call(PyBaseCode.java:134)
+	at org.python.core.PyFunction.__call__(PyFunction.java:416)
+	at org.python.core.PyMethod.__call__(PyMethod.java:126)
+	at org.python.core.PyMethod.__call__(PyMethod.java:117)
+	at com.arm.debug.launch.script.TargetControlScriptRunner.runShutdownHook(TargetControlScriptRunner.java:47)
+	... 9 more

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <?scdStore version="2"?><scannerInfo id="org.eclipse.cdt.make.core.discoveredScannerInfo">
-                                
+                                        
+    
+    
     
     
     
@@ -8,7 +10,9 @@
     
     
     <instance id="cdt.managedbuild.toolchain.gnu.base.677096465;cdt.managedbuild.toolchain.gnu.base.677096465.660980563;cdt.managedbuild.tool.gnu.c.compiler.base.609031077;cdt.managedbuild.tool.gnu.c.compiler.input.480854066">
-                                                                
+                                                                                
+        
+        
         
         
         
@@ -16,6 +20,11 @@
         
         
         <collector id="org.eclipse.cdt.make.core.PerProjectSICollector">
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/lib" removed="true"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/hwlib/include"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/hwlib/include/soc_cv_av"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/hwlib/include/soc_cv_av/socal"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/hwlib/include/safeclib"/>
             <includePath path="C:/lab/soc_lab/cv_soc_lab/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/lib" removed="true"/>
             <includePath path="C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/include"/>
             <includePath path="C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/../../../../include"/>
@@ -27,6 +36,9 @@
             <includePath path="C:/lab/soc_lab/cv_soc_lab/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/hwlib/include/soc_cv_av/socal"/>
             <includePath path="C:/lab/soc_lab/cv_soc_lab/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/hwlib/include/safeclib"/>
             <includePath path="C:/intelFPGA/20.1/embedded/host_tools/linaro/newlib/usr/local/arm-eabi/include" removed="true"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/FreeRTOS-Kernel/include"/>
+            <includePath path="C:/Users/mattb/Desktop/ECE4813/Project_git/Parent/fpga_cnn/workspace_lab3/Atlas-Blinking-LED-Baremetal-GNU/FreeRTOS-Kernel/portable/GCC/ARM_CA9"/>
             <includePath path="C:\intelFPGA\20.1\embedded\host_tools\linaro\newlib\usr\local\arm-eabi\include" removed="true"/>
             <includePath path="C:\intelFPGA\20.1\embedded\host_tools\cygwin\lib\gcc\x86_64-pc-cygwin\13\include"/>
             <includePath path="C:\intelFPGA\20.1\embedded\host_tools\cygwin\usr\include"/>
@@ -514,7 +526,9 @@
             <definedSymbol symbol="__USING_POSIXTHREAD__=1"/>
             <definedSymbol symbol="_REENTRANT=1"/>
         </collector>
-                                                            
+                                                                            
+    
+    
     
     
     
@@ -522,7 +536,9 @@
     
     
     </instance>
-                            
+                                    
+
+
 
 
 
