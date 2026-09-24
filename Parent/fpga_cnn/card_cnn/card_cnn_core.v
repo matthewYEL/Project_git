@@ -43,51 +43,46 @@ module card_cnn_core (
 );
     // ---- activation buffers ----------------------------------------------
     wire [11:0] img_rd_addr;   wire signed [15:0] img_rd_data;
-    ram_dp #(.AW(12), .DEPTH(2304)) u_img (   // 48*48
-    
+    // DEPTH = exact activation size (48*48, 8*48*48, 8*24*24, 16*24*24, 16*12*12);
+    // the default 2^AW depth would cost ~55 extra M10K blocks.
+    ram_dp #(.AW(12), .DEPTH(2304)) u_img (
         .clk(clk), .wr_en(img_wr_en), .wr_addr(img_wr_addr), .wr_data(img_wr_data),
         .rd_addr(img_rd_addr), .rd_data(img_rd_data));
 
     wire        c1_wr_en;  wire [14:0] c1_wr_addr; wire signed [15:0] c1_wr_data;
     wire [14:0] c1_rd_addr; wire signed [15:0] c1_rd_data;
-    ram_dp #(.AW(15), .DEPTH(18432)) u_c1 (   // 8 ch * 48*48
-    
+    ram_dp #(.AW(15), .DEPTH(18432)) u_c1 (
         .clk(clk), .wr_en(c1_wr_en), .wr_addr(c1_wr_addr), .wr_data(c1_wr_data),
         .rd_addr(c1_rd_addr), .rd_data(c1_rd_data));
 
     wire        p1_wr_en;  wire [12:0] p1_wr_addr; wire signed [15:0] p1_wr_data;
     wire [12:0] p1_rd_addr; wire signed [15:0] p1_rd_data;
-    ram_dp #(.AW(13), .DEPTH(4608)) u_p1 (   // 8 ch * 24*24
-    
+    ram_dp #(.AW(13), .DEPTH(4608)) u_p1 (
         .clk(clk), .wr_en(p1_wr_en), .wr_addr(p1_wr_addr), .wr_data(p1_wr_data),
         .rd_addr(p1_rd_addr), .rd_data(p1_rd_data));
 
     wire        c2_wr_en;  wire [13:0] c2_wr_addr; wire signed [15:0] c2_wr_data;
     wire [13:0] c2_rd_addr; wire signed [15:0] c2_rd_data;
-    ram_dp #(.AW(14), .DEPTH(9216)) u_c2 (   // 16 ch * 24*24
-    
+    ram_dp #(.AW(14), .DEPTH(9216)) u_c2 (
         .clk(clk), .wr_en(c2_wr_en), .wr_addr(c2_wr_addr), .wr_data(c2_wr_data),
         .rd_addr(c2_rd_addr), .rd_data(c2_rd_data));
 
     wire        p2_wr_en;  wire [11:0] p2_wr_addr; wire signed [15:0] p2_wr_data;
     wire [11:0] p2_rd_addr; wire signed [15:0] p2_rd_data;
-    ram_dp #(.AW(12), .DEPTH(2304)) u_p2 (   // 16 ch * 12*12
-    
+    ram_dp #(.AW(12), .DEPTH(2304)) u_p2 (
         .clk(clk), .wr_en(p2_wr_en), .wr_addr(p2_wr_addr), .wr_data(p2_wr_data),
         .rd_addr(p2_rd_addr), .rd_data(p2_rd_data));
 
     wire        sh_wr_en;  wire [5:0]  sh_wr_addr; wire signed [15:0] sh_wr_data;
     wire [5:0]  sh_rd_addr; wire signed [15:0] sh_rd_data;
-    ram_dp #(.AW(6), .DEPTH(64)) u_sh (   // hidden layer
-    
+    ram_dp #(.AW(6)) u_sh (
         .clk(clk), .wr_en(sh_wr_en), .wr_addr(sh_wr_addr), .wr_data(sh_wr_data),
         .rd_addr(sh_rd_addr), .rd_data(sh_rd_data));
 
     // head outputs: rank 0..12, suit 13..16, joker 17..18
     wire        hd_wr_en;  wire [4:0] hd_wr_addr; wire signed [15:0] hd_wr_data;
     reg  [4:0]  hd_rd_addr; wire signed [15:0] hd_rd_data;
-    ram_dp #(.AW(5), .DEPTH(19)) u_hd (   // 13 rank + 4 suit + 2 joker
-    
+    ram_dp #(.AW(5)) u_hd (
         .clk(clk), .wr_en(hd_wr_en), .wr_addr(hd_wr_addr), .wr_data(hd_wr_data),
         .rd_addr(hd_rd_addr), .rd_data(hd_rd_data));
 

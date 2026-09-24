@@ -79,7 +79,9 @@ module conv_layer #(
     reg [7:0]  c;              // input channel
     reg [3:0]  ky, kx;         // kernel position
 
-    reg signed [31:0] acc;
+    // 40 bits, not 32: conv2 sums 200 products of up to 32767 x 566, which can
+    // exceed 2^31 on saturated activations. Costs nothing at 50 MHz.
+    reg signed [39:0] acc;
 
     // ---- pipeline registers -----------------------------------------------
     // TWO stages, not one. There are two registers between issuing an address
@@ -117,10 +119,12 @@ module conv_layer #(
     // conv1 -> pool -> conv2 -> pool -> fc, and measurably cost rank accuracy
     // in fixed-point emulation (93.4% vs the float model's 100%). Adding half
     // an LSB before the shift removes the bias for the price of one adder.
-    localparam signed [31:0] HALF_LSB = 32'sd1 <<< (FRAC_BITS - 1);
-    wire signed [31:0] relu_val = (acc[31]) ? 32'sd0 : acc;
-    wire signed [31:0] scaled   = (relu_val + HALF_LSB) >>> FRAC_BITS;
-    wire signed [15:0] sat_val  = (scaled > 32'sd32767) ? 16'sd32767 : scaled[15:0];
+    localparam signed [39:0] HALF_LSB = 40'sd1 <<< (FRAC_BITS - 1);
+    wire signed [39:0] relu_val = (acc[39]) ? 40'sd0 : acc;
+    wire signed [39:0] scaled   = (relu_val + HALF_LSB) >>> FRAC_BITS;
+    wire signed [15:0] sat_val  = (scaled > 40'sd32767) ? 16'sd32767 : scaled[15:0];
+    // explicit 16x16 product so the DSP block gets a 32-bit multiply, not a 40-bit one
+    wire signed [31:0] prod     = $signed(in_rd_data) * $signed(w_d2);
 
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -213,7 +217,7 @@ module conv_layer #(
 
             // accumulate the tap issued two cycles ago, whose data is valid now
             if (issue_v_d2 && bounds_d2)
-                acc <= acc + ($signed(in_rd_data) * $signed(w_d2));
+                acc <= acc + prod;
         end
     end
 

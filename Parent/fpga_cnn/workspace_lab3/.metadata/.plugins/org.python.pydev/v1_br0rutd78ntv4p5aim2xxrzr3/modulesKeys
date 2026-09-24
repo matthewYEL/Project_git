@@ -204,8 +204,8 @@ arm_ds.__init__|C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins
 arm_ds.debugger_v1|C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.debug.interpreter.jython.api_6.10.1.202606121517\arm_ds\debugger_v1.py
 arm_ds.internal|C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.debug.interpreter.jython.api_6.10.1.202606121517\arm_ds\internal.py
 arm_ds.usecase_script|C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.debug.interpreter.jython.api_6.10.1.202606121517\arm_ds\usecase_script.py
-arm_ds_launcher.__init__|C:\Users\mattb\AppData\Roaming\.arm\ds\6.10.1\org.eclipse.osgi\67\0\.cp\arm_ds_launcher\__init__.py
-arm_ds_launcher.targetcontrol|C:\Users\mattb\AppData\Roaming\.arm\ds\6.10.1\org.eclipse.osgi\67\0\.cp\arm_ds_launcher\targetcontrol.py
+arm_ds_launcher.__init__|C:\Users\Asus\AppData\Roaming\.arm\ds\6.10.1\org.eclipse.osgi\67\0\.cp\arm_ds_launcher\__init__.py
+arm_ds_launcher.targetcontrol|C:\Users\Asus\AppData\Roaming\.arm\ds\6.10.1\org.eclipse.osgi\67\0\.cp\arm_ds_launcher\targetcontrol.py
 array
 ast|C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.tpip.jython_2.7.4.16\Jython\Lib\ast.py
 asynchat|C:\Program Files\Arm\Development Studio 2026.0-1\sw\osgi\plugins\com.arm.tpip.jython_2.7.4.16\Jython\Lib\asynchat.py

@@ -121,13 +121,7 @@ endmodule
 module ram_dp #(
     parameter AW    = 12,
     parameter DW    = 16,
-    // DEPTH is the number of words ACTUALLY used, which is usually far fewer
-    // than 2**AW. Declaring mem[0:(1<<AW)-1] made Quartus reserve the full
-    // power-of-two: u_c1 holds 18,432 values but AW=15 reserved 32,768 words,
-    // costing 64 M10K blocks instead of 36. Across the design that wasted 55
-    // blocks on a device with 553. Address width still has to be a power of
-    // two to carry the values, but the array does not.
-    parameter DEPTH = (1 << AW)
+    parameter DEPTH = (1<<AW)      // real depth; a full 2^AW would waste M10K blocks
 )(
     input  wire             clk,
     input  wire             wr_en,
