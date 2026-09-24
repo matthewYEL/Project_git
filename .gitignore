@@ -1,3 +1,4 @@
+ECE4813_Arm_Based_SoC_Mini_Project_Description.docx.pdf
 # Repo root is Project_git/; the Quartus project lives in Parent/fpga_cnn/,
 # so directory rules are anchored with that prefix. Extension globs are left
 # unanchored so they match wherever Quartus drops them.
