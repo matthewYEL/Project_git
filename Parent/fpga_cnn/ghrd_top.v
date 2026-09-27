@@ -128,18 +128,68 @@ module ghrd_top (
 
   assign fpga_led_pio = fpga_led_internal;
 
+  // ---------- CNN geometry: the ONE place these are set ----------
+  // Both must match the checkpoint the weights came from: export_weights_rtl.py
+  // records them in weights_manifest.json ("conv1_ch", "img_dw") and prints the
+  // two lines to paste here. camera_capture and card_cnn_core both take IMG_DW
+  // from here, so the image RAM's writer and reader cannot disagree.
+  //
+  // They are also the M10K budget's two levers (553 blocks on this device;
+  // estimates, the fitter has the final word). With fc_shared's weights in
+  // DDR3 (card_cnn_core.v) every combination fits:
+  //     CONV1_CH  IMG_DW   blocks
+  //         8      10      ~465   <- default: 8 filters, full 8-bit gray
+  //         8       5      ~390
+  //         4      10      ~385
+  //         4       5      ~315
+  // (With fcs_w still on chip, 8/10 was ~610 and did not fit -- that is what
+  // the DDR3 port bought.) IMG_DW 5 keeps 32 grey levels; the model must be
+  // trained at the same depth (the trainer's --quant_bits).
+  localparam        CONV1_CH   = 8;
+  localparam        IMG_DW     = 10;
+  localparam [17:0] IMG_PIXELS = 18'd147456;   // 384*384; card_pipeline.h IMG_PIXELS
+
   // ---------- HPS <-> CNN / camera PIOs (see atlas_main.c for the bit layout) ----------
   wire [31:0] cnn_result_wire;     // [3:0] rank [5:4] suit [6] joker [7] done [8] colour [9] snapshot_done [31:16] rank_score
   wire        cnn_start_wire;
-  wire [13:0] img_wr_addr_wire;    // PIO is 14 bits; core uses [11:0] = 0..2303 = y*48 + x
-  wire [15:0] img_wr_data_wire;    // Q6.10 pixel
-  wire [3:0]  img_wr_ctrl_wire;    // [0] wr_en, [1] unused, [2] colour override en, [3] colour override val
+  // img_wr_addr/img_wr_data stopped carrying pixels with the 384x384 build (the
+  // capture path writes the image RAM itself); they are now the write port of
+  // the HDMI text layer (text_overlay.v, via camera_capture): img_wr_data = the
+  // cell word {bg, fg, cp437}, img_wr_addr[11:0] = row*80 + col, and
+  // img_wr_addr[13] = write enable (level). The enable deliberately lives in
+  // the address PIO, not img_wr_ctrl: CPU1's infer() writes img_wr_ctrl's
+  // colour-override bits, and a CPU0 strobe there could clobber them between
+  // that write and the start pulse. CPU0's GUI (M2/hdmi_gui.c) owns these two
+  // PIOs, CPU1 owns img_wr_ctrl.
+  wire [13:0] img_wr_addr_wire;
+  wire [15:0] img_wr_data_wire;
+  wire [3:0]  img_wr_ctrl_wire;    // [0] unused (was wr_en), [1] unused, [2] colour override en, [3] colour override val
 
   // ---------- 新增：摄像头相关连线 ----------
-  wire [13:0] snapshot_addr_wire;  // 0..9215 cells, 9216 = red_count, 9217 = colour flag
+  // snapshot_addr 0..147455 reads the captured image (Q6.10, one pixel per
+  // word); 147456..147463 = IMG_PIXELS + n reads the capture diagnostics, in
+  // the same order card_pipeline.h's SNAP_* constants have always used.
+  // 18 bits since soc_system.qsys widened the PIO -- needs qsys-generate.
+  wire [17:0] snapshot_addr_wire;
   wire [15:0] snapshot_data_wire;
   wire        camera_trigger_wire;
   wire        snapshot_done_w, snapshot_colour_w;
+
+  // capture_384 -> card_cnn_core image RAM, in the MIPI_PIXEL_CLK domain
+  wire              cap_img_wr_en;
+  wire [17:0]       cap_img_wr_addr;
+  wire [IMG_DW-1:0] cap_img_wr_data;
+  wire [IMG_DW-1:0] img_dbg_data;
+  wire [2:0]        cap_diag_addr = snapshot_addr_wire[2:0];
+  wire [15:0]       cap_diag_data;
+
+  // card_cnn_core <-> f2h_sdram0 (fc_shared weights in DDR3)
+  wire [29:0] ddr_address;
+  wire [7:0]  ddr_burstcount;
+  wire        ddr_waitrequest, ddr_readdatavalid, ddr_read, ddr_write;
+  wire [31:0] ddr_readdata, ddr_writedata;
+  wire [3:0]  ddr_byteenable;
+  wire        ddr_err;
 
 soc_system soc_inst (
   .memory_mem_a                         (hps_memory_mem_a),
@@ -221,7 +271,19 @@ soc_system soc_inst (
   .camera_capture_trigger_pio_external_connection_export (camera_trigger_wire),
   .img_wr_addr_pio_external_connection_export (img_wr_addr_wire),
   .img_wr_data_pio_external_connection_export (img_wr_data_wire),
-  .img_wr_ctrl_pio_external_connection_export (img_wr_ctrl_wire)
+  .img_wr_ctrl_pio_external_connection_export (img_wr_ctrl_wire),
+  // FPGA-to-SDRAM port into HPS DDR3 (Avalon-MM, 32-bit, WORD-addressed, clk_0),
+  // mirrored from the professor's DDR3 reference system. card_cnn_core fetches
+  // fc_shared's weights through it.
+  .f2h_sdram0_data_address       (ddr_address),
+  .f2h_sdram0_data_burstcount    (ddr_burstcount),
+  .f2h_sdram0_data_waitrequest   (ddr_waitrequest),
+  .f2h_sdram0_data_readdata      (ddr_readdata),
+  .f2h_sdram0_data_readdatavalid (ddr_readdatavalid),
+  .f2h_sdram0_data_read          (ddr_read),
+  .f2h_sdram0_data_writedata     (ddr_writedata),
+  .f2h_sdram0_data_byteenable    (ddr_byteenable),
+  .f2h_sdram0_data_write         (ddr_write)
 );
 
 debounce debounce_inst (
@@ -235,7 +297,7 @@ debounce debounce_inst (
   defparam debounce_inst.TIMEOUT = 50000;
   defparam debounce_inst.TIMEOUT_WIDTH = 16;
 
-  // ---------- friend's 3-head card CNN (96x96 in, Q6.10) ----------
+  // ---------- friend's 3-head card CNN (384x384 in, Q6.10) ----------
   wire        core_done;
   wire [3:0]  rank_idx;
   wire [1:0]  suit_idx;
@@ -254,8 +316,9 @@ debounce debounce_inst (
   always @(posedge fpga_clk_50) cnn_start_d <= cnn_start_wire;
   wire start_pulse = cnn_start_wire & ~cnn_start_d;
 
-  // colour flag: hardware detector (2-flop synced from the VGA domain) unless software overrides.
-  // Latched on start so it holds through the whole ~52 ms inference.
+  // colour flag: hardware detector (2-flop synced from the MIPI pixel-clock domain)
+  // unless software overrides. Latched on start so it holds through the whole
+  // ~1.7 s inference.
   reg [1:0] col_sync, snap_done_sync;
   always @(posedge fpga_clk_50) begin
     col_sync       <= {col_sync[0],       snapshot_colour_w};
@@ -271,25 +334,69 @@ debounce debounce_inst (
     if (core_rst | start_pulse) done_sticky <= 1'b0;
     else if (core_done)         done_sticky <= 1'b1;
 
-  card_cnn_core u_card_cnn (
+  // The image RAM's single read port is shared by conv1 and the host's debug
+  // read-back. Hand it to the host only while no inference is running, so a
+  // stray host read can never feed conv1 the wrong pixel. Set on the start
+  // pulse -- conv1 issues its first address at least two cycles later, inside
+  // the core -- and cleared by done.
+  reg core_busy;
+  always @(posedge fpga_clk_50)
+    if (core_rst)         core_busy <= 1'b0;
+    else if (start_pulse) core_busy <= 1'b1;
+    else if (core_done)   core_busy <= 1'b0;
+
+  card_cnn_core #(.CONV1_CH(CONV1_CH), .IMG_DW(IMG_DW)) u_card_cnn (
       .clk          (fpga_clk_50),
       .rst          (core_rst),
       .start        (start_pulse),
-      .img_wr_en    (img_wr_ctrl_wire[0]),
-      .img_wr_addr  (img_wr_addr_wire[11:0]),
-      .img_wr_data  (img_wr_data_wire),
+      // written by capture_384 on the camera's own clock; the RAM is dual-clock
+      .img_wr_clk   (MIPI_PIXEL_CLK),
+      .img_wr_en    (cap_img_wr_en),
+      .img_wr_addr  (cap_img_wr_addr),
+      .img_wr_data  (cap_img_wr_data),
+      .img_dbg_en   (~core_busy),
+      .img_dbg_addr (snapshot_addr_wire),
+      .img_dbg_data (img_dbg_data),
       .colour_flag  (colour_lat),
       .rank_idx     (rank_idx),
       .suit_idx     (suit_idx),
       .is_joker     (is_joker),
       .rank_score   (rank_score),
-      .done         (core_done)
+      .done         (core_done),
+      .avm_address       (ddr_address),
+      .avm_burstcount    (ddr_burstcount),
+      .avm_read          (ddr_read),
+      .avm_write         (ddr_write),
+      .avm_writedata     (ddr_writedata),
+      .avm_byteenable    (ddr_byteenable),
+      .avm_waitrequest   (ddr_waitrequest),
+      .avm_readdata      (ddr_readdata),
+      .avm_readdatavalid (ddr_readdatavalid),
+      .ddr_err           (ddr_err)
   );
 
-  assign cnn_result_wire = {rank_score, 6'b0, snap_done_sync[1], colour_lat, done_sticky, is_joker, suit_idx, rank_idx};
+  // [10] = DDR3 weight fetch timed out during this inference (atlas_main.c
+  // RES_DDR_ERR): the result is not a real classification.
+  assign cnn_result_wire = {rank_score, 5'b0, ddr_err, snap_done_sync[1], colour_lat, done_sticky, is_joker, suit_idx, rank_idx};
+
+  // snapshot_data: an image pixel below IMG_PIXELS, a capture diagnostic at
+  // IMG_PIXELS + n. The image RAM's read is registered, so register the select
+  // and the diagnostic word too -- both halves then answer one clk50 after the
+  // address, which is what atlas_main.c's snap_read dummy access expects.
+  // Pixels come back as the Q6.10 value conv1 actually consumes (the stored
+  // code with its dropped low bits shifted back in as zero), so the host needs
+  // no knowledge of IMG_DW: gray = value >> 2.
+  reg        diag_sel_d;
+  reg [15:0] diag_data_d;
+  always @(posedge fpga_clk_50) begin
+    diag_sel_d  <= (snapshot_addr_wire >= IMG_PIXELS);
+    diag_data_d <= cap_diag_data;
+  end
+  wire [15:0] img_dbg_q = {{(16-10){1'b0}}, img_dbg_data, {(10-IMG_DW){1'b0}}};
+  assign snapshot_data_wire = diag_sel_d ? diag_data_d : img_dbg_q;
 
   // ---------- 新增：例化摄像头模块 ----------
-  camera_capture u_camera (
+  camera_capture #(.IMG_DW(IMG_DW)) u_camera (
       .clk50               (fpga_clk_50),
       .clk2_50             (FPGA_CLK2_50),
       .rst_n               (hps_fpga_reset_n),
@@ -315,10 +422,17 @@ debounce debounce_inst (
       .dbg_lut_index(dbg_lut_index),   .dbg_ack(dbg_ack),
       .dbg_ready_latched(dbg_ready_latched), .dbg_hdmi_int(dbg_hdmi_int),
 
-      .hps_rd_addr(snapshot_addr_wire),
-      .hps_rd_data(snapshot_data_wire),
+      .img_wr_en(cap_img_wr_en),
+      .img_wr_addr(cap_img_wr_addr),
+      .img_wr_data(cap_img_wr_data),
+      .hps_diag_addr(cap_diag_addr),
+      .hps_diag_data(cap_diag_data),
       .snapshot_done(snapshot_done_w),
-      .snapshot_colour(snapshot_colour_w)
+      .snapshot_colour(snapshot_colour_w),
+
+      .txt_wr_en(img_wr_addr_wire[13]),
+      .txt_wr_addr(img_wr_addr_wire[11:0]),
+      .txt_wr_data(img_wr_data_wire)
   );
 
 endmodule

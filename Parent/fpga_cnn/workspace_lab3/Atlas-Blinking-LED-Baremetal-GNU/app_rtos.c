@@ -1,251 +1,256 @@
+/* Compiled only in the FreeRTOS build (RTOS_MODE in app_config.h). */
+#include "app_config.h"
+#if RTOS_MODE
 /*
- * The FreeRTOS application: the card pipeline as three tasks on CPU0, with the
- * preprocessing stage handed to CPU1.
+ * The FreeRTOS application for the 384x384 snapshot build: FreeRTOS on CPU0,
+ * the vision job on CPU1.
  *
- *   prio 3  Capture   trigger the camera, read the raw cells, hand the
- *                     frame to CPU1. Highest priority because the camera is
- *                     the only part with a real deadline -- miss a frame and
- *                     it is gone.
- *   prio 2  Infer     collect the preprocessed frame from CPU1, upload it,
- *                     start the CNN, poll for the result.
- *   prio 1  Report    printf. Lowest priority on purpose: semihosting putchar
- *                     is slow enough to dominate the loop, and it is the one
- *                     stage nothing else waits on.
+ *   CPU1  (bare metal, amp.c)  runs vision_run(): trigger the camera, wait for
+ *                              the frame, sample it, start the CNN, poll the
+ *                              ~1.7 s inference, decode. It owns the camera/CNN
+ *                              PIOs while a job is in flight.
  *
- * Two slots circulate between Capture and Infer through a pair of queues, so
- * Capture can already be reading frame N+1 out of the FPGA while CPU1
- * preprocesses frame N and Infer uploads frame N-1. Without the second core
- * those stages serialise; with it they overlap, which is what the frame times
- * in the report line show.
+ *   CPU0  (FreeRTOS, 3 tasks):
+ *     prio 3  Input   every 10 ms reads the KEY presses latched in button_pio's
+ *                     edge-capture register and issues one job per press (or
+ *                     one every AUTO_PERIOD_MS with SW3 up). A press while a
+ *                     job is running is answered at once with "busy" -- CPU0
+ *                     stays responsive while CPU1 works.
+ *     prio 2  Vision  hands the job to CPU1 and sleeps until it is done (or runs
+ *                     it on CPU0 if CPU1 never came up / stops answering).
+ *     prio 1  Report  the only task that prints: result line, ASCII preview
+ *                     (SW0), PGM dump (SW1), run-time statistics (SW2, and every
+ *                     STATS_EVERY results). Lowest priority on purpose:
+ *                     semihosted printf is slow and nothing else waits on it.
+ *
+ * FPGA ownership: the PGM dump and the camera diagnostics read the image RAM
+ * from CPU0, which is only safe with no job in flight. So Vision takes the next
+ * job only after Report has finished with the current one (task notification).
  *
  * Nothing here touches CPU1 except through amp.c's req/done handshake --
  * FreeRTOS is not SMP-safe and CPU1 must never see a kernel object.
  */
 #include <stdio.h>
-#include <string.h>
 #include <stdint.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "semphr.h"
 
-#include "app_config.h"
 #include "card_pipeline.h"
 #include "amp.h"
 
 extern void     vInstallVectorTable( void );
 extern void     vInitialiseGIC( void );
 extern void     vInitPeriphClock( void );
-extern void     vRunTimeStatsTimerInit( void );
-extern uint32_t ulGlobalTimerNow( void );
-extern uint32_t ulGlobalTimerToUs( uint32_t ulTicks );
 extern uint32_t ulGetPeriphClockHz( void );
 
-#define CAPTURE_PRIO    3
-#define INFER_PRIO      2
+#define INPUT_PRIO      3
+#define VISION_PRIO     2
 #define REPORT_PRIO     1
 
-#define CAPTURE_STACK   ( configMINIMAL_STACK_SIZE * 2 )
-#define INFER_STACK     ( configMINIMAL_STACK_SIZE * 2 )
+#define INPUT_STACK     ( configMINIMAL_STACK_SIZE * 2 )
+#define VISION_STACK    ( configMINIMAL_STACK_SIZE * 4 )
 #define REPORT_STACK    ( configMINIMAL_STACK_SIZE * 8 )   /* printf lives here */
 
-struct frame_msg
+#define KEY_POLL_MS     10
+
+struct job_req
 {
-    uint8_t  slot;
-    uint32_t frame;
-    uint32_t cap_us;
+    uint32_t shot;
+    unsigned sw;
 };
 
-struct result_msg
+enum { REPORT_RESULT, REPORT_BUSY };
+
+struct report_msg
 {
-    uint32_t frame;
-    unsigned result;
-    unsigned red_count;
-    unsigned minv, maxv;
-    uint32_t cap_us, pre_us, inf_us;
-    uint8_t  preproc_on_core1;
+    uint8_t                      kind;
+    uint8_t                      on_core1;
+    uint32_t                     shot;
+    unsigned                     sw;
+    const struct vision_result * res;   /* stays valid until Report notifies Vision */
 };
 
-static QueueHandle_t xFreeSlots;    /* slot indices Capture may write */
-static QueueHandle_t xReadyFrames;  /* slots handed on to Infer       */
-static QueueHandle_t xResults;      /* results handed on to Report    */
+static QueueHandle_t xJobs;         /* Input  -> Vision, depth 1 */
+static QueueHandle_t xReports;      /* Input/Vision -> Report    */
+static TaskHandle_t  xVisionTask;
 
-static volatile uint32_t ulCore1Frames;   /* frames preprocessed on CPU1 */
-static volatile uint32_t ulCore0Frames;   /* frames preprocessed on CPU0 */
+/* Set by Input when it issues a job, cleared by Vision once Report is done with
+ * it. One writer each side, so a plain volatile is enough. */
+static volatile int  xJobInFlight;
+static volatile int  xCore1Lost;    /* CPU1 stopped answering: run jobs on CPU0 */
+
+static struct vision_result xLocalResult;   /* CPU0 fallback target */
+
+static uint32_t ulJobsCore1, ulJobsCore0;
 
 /* ---- tasks -------------------------------------------------------------- */
 
-static void prvCaptureTask( void * pvParameters )
+static void prvInputTask( void * pvParameters )
 {
-    uint32_t ulFrame = 0;
+    uint32_t   ulShot      = 0;
+    TickType_t xLastIssued = xTaskGetTickCount();
 
     ( void ) pvParameters;
 
     for( ;; )
     {
-        struct frame_msg xMsg;
-        struct amp_slot *pxSlot;
-        uint8_t          ucSlot;
-        uint32_t         ulStart;
-        unsigned         minv, maxv;
+        /* Presses are latched in button_pio's edge-capture register, so one
+         * made while CPU0 was halted in a semihosted printf is still here. */
+        unsigned uPressed = key_presses();
+        unsigned uSw      = read_switches();
+        int      iAuto    = ( uSw & SW_AUTO ) && !xJobInFlight &&
+                            ( xTaskGetTickCount() - xLastIssued ) >= pdMS_TO_TICKS( AUTO_PERIOD_MS );
 
-        if( xQueueReceive( xFreeSlots, &ucSlot, portMAX_DELAY ) != pdPASS )
+        if( uPressed && xJobInFlight )
         {
-            continue;
+            struct report_msg xMsg = { REPORT_BUSY, 0, ulShot - 1u, 0, NULL };
+            xQueueSend( xReports, &xMsg, 0 );
+        }
+        else if( uPressed || iAuto )
+        {
+            struct job_req xReq;
+
+            xReq.shot   = ulShot++;
+            xReq.sw     = uSw;
+            xLastIssued = xTaskGetTickCount();
+            xJobInFlight = 1;
+            xQueueSend( xJobs, &xReq, portMAX_DELAY );
         }
 
-        pxSlot  = &AMP->slot[ ucSlot ];
-        ulStart = ulGlobalTimerNow();
-
-        if( !capture_once() )
-        {
-            /* Camera not streaming. Give the slot back and back off rather
-             * than spinning on a dead link. */
-            xQueueSend( xFreeSlots, &ucSlot, 0 );
-            vTaskDelay( pdMS_TO_TICKS( 100 ) );
-            continue;
-        }
-
-        read_snapshot( pxSlot->raw, &minv, &maxv );
-        pxSlot->minv      = minv;
-        pxSlot->maxv      = maxv;
-        pxSlot->red_count = snap_read( SNAP_RED_COUNT );
-
-        if( ampCore1Running() )
-        {
-            ampSubmit( pxSlot );
-        }
-
-        xMsg.slot   = ucSlot;
-        xMsg.frame  = ulFrame++;
-        xMsg.cap_us = ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart );
-
-        xQueueSend( xReadyFrames, &xMsg, portMAX_DELAY );
+        vTaskDelay( pdMS_TO_TICKS( KEY_POLL_MS ) );
     }
 }
 
-static void prvInferTask( void * pvParameters )
+static void prvVisionTask( void * pvParameters )
 {
     ( void ) pvParameters;
 
     for( ;; )
     {
-        struct frame_msg  xMsg;
-        struct result_msg xRes;
-        struct amp_slot  *pxSlot;
-        uint32_t          ulStart;
+        struct job_req    xReq;
+        struct report_msg xMsg;
 
-        if( xQueueReceive( xReadyFrames, &xMsg, portMAX_DELAY ) != pdPASS )
+        if( xQueueReceive( xJobs, &xReq, portMAX_DELAY ) != pdPASS )
         {
             continue;
         }
 
-        pxSlot = &AMP->slot[ xMsg.slot ];
+        xMsg.kind     = REPORT_RESULT;
+        xMsg.shot     = xReq.shot;
+        xMsg.sw       = xReq.sw;
+        xMsg.res      = NULL;
+        xMsg.on_core1 = 0;
 
-        /* Collect the preprocessed frame from CPU1. If it never comes -- CPU1
-         * was never released, or has wedged -- do it here instead. The demo
-         * degrades to single-core rather than stopping. */
-        ulStart = ulGlobalTimerNow();
-
-        if( ampCore1Running() && ampWait( pxSlot, CORE1_FRAME_TIMEOUT_US ) )
+        if( ampCore1Running() && !xCore1Lost )
         {
-            xRes.preproc_on_core1 = 1;
-            xRes.pre_us = pxSlot->us;
-            ulCore1Frames++;
+            ampSubmit();
+            if( ampWait( CORE1_JOB_TIMEOUT_US ) )
+            {
+                xMsg.res      = &AMP->job.res;
+                xMsg.on_core1 = 1;
+                ulJobsCore1++;
+            }
+            else
+            {
+                /* Longer than any job can take (capture timeouts + the 5 s
+                 * inference timeout): CPU1 is wedged, so stop giving it work
+                 * rather than risk two cores driving the FPGA at once. */
+                xCore1Lost = 1;
+            }
         }
-        else
+
+        if( xMsg.res == NULL )
         {
-            preprocess( pxSlot->raw, pxSlot->q );
-            xRes.preproc_on_core1 = 0;
-            xRes.pre_us = ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart );
-            ulCore0Frames++;
+            vision_run( &xLocalResult );
+            xMsg.res = &xLocalResult;
+            ulJobsCore0++;
         }
 
-        ulStart = ulGlobalTimerNow();
-        xRes.result = upload_and_infer( pxSlot->q, pxSlot->red_count );
-        xRes.inf_us = ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart );
+        xQueueSend( xReports, &xMsg, portMAX_DELAY );
 
-        xRes.frame     = xMsg.frame;
-        xRes.cap_us    = xMsg.cap_us;
-        xRes.red_count = pxSlot->red_count;
-        xRes.minv      = pxSlot->minv;
-        xRes.maxv      = pxSlot->maxv;
-
-        /* The slot is free the moment its pixels have been uploaded. */
-        xQueueSend( xFreeSlots, &xMsg.slot, portMAX_DELAY );
-        xQueueSend( xResults, &xRes, portMAX_DELAY );
+        /* Hold the next job until Report is done: its PGM dump / camera
+         * diagnostics read the FPGA from CPU0, and it reads the result block. */
+        ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
+        xJobInFlight = 0;
     }
 }
 
-#if STATS_EVERY
 static char cStatsBuffer[ 640 ];
 
-static void prvPrintRunTimeStats( void )
+/* The scheduling evidence: per-task CPU0 time straight out of the kernel, and
+ * how much work CPU1 has done. */
+static void prvPrintStats( void )
 {
     printf( "\n  FreeRTOS run-time stats (CPU0)\n"
             "  Task            Abs time     %%\n" );
     vTaskGetRunTimeStats( cStatsBuffer );
     fputs( cStatsBuffer, stdout );
-
-    printf( "  CPU1 worker: %lu frames, %lu us busy",
-            ( unsigned long ) AMP->core1_frames,
-            ( unsigned long ) AMP->core1_busy_us );
-    if( AMP->core1_frames )
+    printf( "  CPU1 vision worker: %lu jobs, %lu ms busy",
+            ( unsigned long ) AMP->core1_jobs,
+            ( unsigned long ) ( AMP->core1_busy_us / 1000UL ) );
+    if( AMP->core1_jobs )
     {
-        printf( " (%lu us/frame)",
-                ( unsigned long ) ( AMP->core1_busy_us / AMP->core1_frames ) );
+        printf( " (%lu ms/job)",
+                ( unsigned long ) ( AMP->core1_busy_us / 1000UL / AMP->core1_jobs ) );
     }
-    printf( "\n  preprocessing: %lu frames on CPU1, %lu on CPU0\n\n",
-            ( unsigned long ) ulCore1Frames, ( unsigned long ) ulCore0Frames );
+    printf( "\n  jobs run on CPU1: %lu, on CPU0 (fallback): %lu%s\n\n",
+            ( unsigned long ) ulJobsCore1, ( unsigned long ) ulJobsCore0,
+            xCore1Lost ? "   ! CPU1 stopped answering" : "" );
 }
-#endif /* STATS_EVERY */
 
 static void prvReportTask( void * pvParameters )
 {
+    uint32_t ulResults = 0;
+
     ( void ) pvParameters;
 
     for( ;; )
     {
-        struct result_msg xRes;
+        struct report_msg            xMsg;
+        const struct vision_result * pxRes;
 
-        if( xQueueReceive( xResults, &xRes, portMAX_DELAY ) != pdPASS )
+        if( xQueueReceive( xReports, &xMsg, portMAX_DELAY ) != pdPASS )
         {
             continue;
         }
 
-        printf( "[%5lu] ", ( unsigned long ) xRes.frame );
-
-        if( xRes.result == 0 )
+        if( xMsg.kind == REPORT_BUSY )
         {
-            printf( "inference timeout\n" );
-        }
-        else
-        {
-            print_result_name( xRes.result );
-            printf( "  logit %5d  red %5u->%-5s  min %4u max %4u"
-                    "  | cap %4lu us  pre %4lu us on CPU%d  inf %5lu us",
-                    RES_SCORE( xRes.result ), xRes.red_count,
-                    RES_COLOUR( xRes.result ) ? "red" : "black",
-                    xRes.minv, xRes.maxv,
-                    ( unsigned long ) xRes.cap_us,
-                    ( unsigned long ) xRes.pre_us,
-                    xRes.preproc_on_core1 ? 1 : 0,
-                    ( unsigned long ) xRes.inf_us );
-
-            if( xRes.maxv == 0 )
-            {
-                printf( "   <- BLANK FRAME" );
-            }
-            printf( "\n" );
+            printf( "       busy: CPU%d is still on shot %lu -- press ignored\n",
+                    ( ampCore1Running() && !xCore1Lost ) ? 1 : 0,
+                    ( unsigned long ) xMsg.shot );
+            continue;
         }
 
+        pxRes = xMsg.res;
+
+        if( ( xMsg.sw & SW_PREVIEW ) &&
+            ( pxRes->status == VIS_OK || pxRes->status == VIS_INFER_TIMEOUT ) )
+        {
+            print_preview( pxRes->art );
+        }
+
+        print_vision_result( xMsg.shot, pxRes, xMsg.on_core1 ? "CPU1" : "CPU0" );
+
+        /* only once the core is done: until then the image read port is conv1's */
+        if( ( xMsg.sw & SW_PGM ) && pxRes->status == VIS_OK && !RES_DDR_ERR( pxRes->result ) )
+        {
+            dump_pgm();
+        }
+
+        ulResults++;
+        if( ( xMsg.sw & SW_STATS )
 #if STATS_EVERY
-        if( ( ( xRes.frame + 1 ) % STATS_EVERY ) == 0 )
-        {
-            prvPrintRunTimeStats();
-        }
+            || ( ( ulResults % STATS_EVERY ) == 0 )
 #endif
+          )
+        {
+            prvPrintStats();
+        }
+
+        xTaskNotifyGive( xVisionTask );
     }
 }
 
@@ -253,64 +258,52 @@ static void prvReportTask( void * pvParameters )
 
 int rtos_main( void )
 {
-    uint8_t ucSlot;
+    printf( "\n=== DE10-Nano card CNN -- FreeRTOS on CPU0, vision worker on CPU1 ===\n" );
 
-    printf( "\n=== DE10-Nano card CNN -- FreeRTOS on CPU0, worker on CPU1 ===\n" );
-
-    /* The global timer is the timebase for the AMP handshake timeouts, so it
-     * has to be running before CPU1 is released -- not just from the point the
-     * scheduler starts it for the run-time stats. */
+    /* main() has already started the global timer (the timebase for the AMP
+     * handshake timeouts), loaded the DDR3 weights and checked the camera. */
     vInitPeriphClock();
-    vRunTimeStatsTimerInit();
 
     /* Exception vectors, VBAR and the exception-mode stacks; then the GIC.
      * None of this exists in the lab's bare-metal template. */
     vInstallVectorTable();
     vInitialiseGIC();
-    printf( "  mpu_periph_clk %lu Hz\n",
-            ( unsigned long ) ulGetPeriphClockHz() );
-
-    check_camera_alive();
+    printf( "  mpu_periph_clk %lu Hz\n", ( unsigned long ) ulGetPeriphClockHz() );
 
 #if USE_CORE1
-    printf( "  releasing CPU1 (trampoline at 0x0, entry via "
-            "sysmgr.cpu1startaddr)...\n" );
+    printf( "  releasing CPU1 (trampoline at 0x0, entry via sysmgr.cpu1startaddr)...\n" );
     if( ampStartCore1() )
     {
-        printf( "  CPU1 is up: preprocessing runs there, shared block at "
+        printf( "  CPU1 is up: vision worker (capture + CNN control), shared block at "
                 "0x%08lX\n", ( unsigned long ) AMP_SHARED_BASE );
     }
     else
     {
-        printf( "  ! CPU1 did not check in -- continuing on CPU0 alone.\n"
-                "    Everything still works, just without the overlap.\n" );
+        printf( "  ! CPU1 did not check in -- jobs run on CPU0 instead.\n" );
     }
 #else
-    printf( "  USE_CORE1 is 0: single core.\n" );
+    printf( "  USE_CORE1 is 0: jobs run on CPU0.\n" );
 #endif
 
-    xFreeSlots   = xQueueCreate( AMP_SLOTS, sizeof( uint8_t ) );
-    xReadyFrames = xQueueCreate( AMP_SLOTS, sizeof( struct frame_msg ) );
-    xResults     = xQueueCreate( 4, sizeof( struct result_msg ) );
+    xJobs    = xQueueCreate( 1, sizeof( struct job_req ) );
+    xReports = xQueueCreate( 4, sizeof( struct report_msg ) );
 
-    if( ( xFreeSlots == NULL ) || ( xReadyFrames == NULL ) || ( xResults == NULL ) )
+    if( ( xJobs == NULL ) || ( xReports == NULL ) )
     {
         printf( "  ! could not create queues\n" );
         return 1;
     }
 
-    for( ucSlot = 0; ucSlot < AMP_SLOTS; ucSlot++ )
-    {
-        xQueueSend( xFreeSlots, &ucSlot, 0 );
-    }
+    xTaskCreate( prvInputTask,  "Input",  INPUT_STACK,  NULL, INPUT_PRIO,  NULL );
+    xTaskCreate( prvVisionTask, "Vision", VISION_STACK, NULL, VISION_PRIO, &xVisionTask );
+    xTaskCreate( prvReportTask, "Report", REPORT_STACK, NULL, REPORT_PRIO, NULL );
 
-    xTaskCreate( prvCaptureTask, "Capture", CAPTURE_STACK, NULL, CAPTURE_PRIO, NULL );
-    xTaskCreate( prvInferTask,   "Infer",   INFER_STACK,   NULL, INFER_PRIO,   NULL );
-    xTaskCreate( prvReportTask,  "Report",  REPORT_STACK,  NULL, REPORT_PRIO,  NULL );
-
-    printf( "  tasks: Capture(p%d) -> Infer(p%d) -> Report(p%d), %d frame slots\n",
-            CAPTURE_PRIO, INFER_PRIO, REPORT_PRIO, AMP_SLOTS );
-    printf( "  starting scheduler\n\n" );
+    printf( "  tasks: Input(p%d) -> Vision(p%d) -> Report(p%d)\n",
+            INPUT_PRIO, VISION_PRIO, REPORT_PRIO );
+    printf( "snapshot mode -- press KEY0 or KEY1 to capture and classify.\n"
+            "SW0 = ASCII preview, SW1 = PGM dump, SW2 = scheduling stats,\n"
+            "SW3 = auto-capture every %u ms (SW0+SW3 = ASCII viewfinder for aiming).\n\n",
+            ( unsigned ) AUTO_PERIOD_MS );
 
     vTaskStartScheduler();
 
@@ -318,3 +311,4 @@ int rtos_main( void )
     printf( "\n*** scheduler returned -- out of heap ***\n" );
     for( ;; ) { }
 }
+#endif /* RTOS_MODE */

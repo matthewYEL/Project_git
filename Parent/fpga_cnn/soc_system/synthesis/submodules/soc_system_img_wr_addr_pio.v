@@ -33,7 +33,7 @@ module soc_system_img_wr_addr_pio (
                                   )
 ;
 
-  output  [ 11: 0] out_port;
+  output  [ 13: 0] out_port;
   output  [ 31: 0] readdata;
   input   [  1: 0] address;
   input            chipselect;
@@ -44,19 +44,19 @@ module soc_system_img_wr_addr_pio (
 
 
 wire             clk_en;
-reg     [ 11: 0] data_out;
-wire    [ 11: 0] out_port;
-wire    [ 11: 0] read_mux_out;
+reg     [ 13: 0] data_out;
+wire    [ 13: 0] out_port;
+wire    [ 13: 0] read_mux_out;
 wire    [ 31: 0] readdata;
   assign clk_en = 1;
   //s1, which is an e_avalon_slave
-  assign read_mux_out = {12 {(address == 0)}} & data_out;
+  assign read_mux_out = {14 {(address == 0)}} & data_out;
   always @(posedge clk or negedge reset_n)
     begin
       if (reset_n == 0)
           data_out <= 0;
       else if (chipselect && ~write_n && (address == 0))
-          data_out <= writedata[11 : 0];
+          data_out <= writedata[13 : 0];
     end
 
 

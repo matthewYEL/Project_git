@@ -1,74 +1,104 @@
 {
-  "source": "handover_96_v2 (checkpoints_13), installed as delivered",
-  "checkpoint": "handover_96_v2/model/best_dualhead_model.pt",
-  "checkpoint_sha256": "573fed0044fb2275b909e6e41c4be3838c3a0ed33d996f0ce3a54f0c5a106047",
-  "architecture": "48x48 -> conv1 1->8 5x5 -> pool -> conv2 8->16 5x5 -> pool -> flatten 2304 + colour = 2305 -> fc_shared 64 -> fc_rank 13 | fc_suit 4 | fc_joker 2",
+  "checkpoint": "checkpoints_14\\best_dualhead_model.pt",
+  "checkpoint_sha256": "487107902eade8ddf522801c70d690ff54c2fdc6df42d5bba20cf11026280236",
   "frac_bits": 10,
-  "format": "Q6.10, 16-bit two's complement, 4 hex digits per line",
-  "note": "No per-layer activation rescaling. The previous checkpoints_12 set was a 96x96 3-conv model with layer_scales and a conv3 stage; it does not apply to this network and conv3_*.hex were removed.",
-  "per_tensor_quant_scales": {
-    "conv1_w": 0.003161425430943647,
-    "conv1_b": 0.002420908822788028,
-    "conv2_w": 0.004044244139213261,
-    "conv2_b": 0.0008391043919277942,
-    "fc_shared_w": 0.00779497764241977,
-    "fc_shared_b": 0.00045388711132402496,
-    "fc_rank_w": 0.0027423059846472552,
-    "fc_rank_b": 0.000909962874697888,
-    "fc_suit_w": 0.001992634196919719,
-    "fc_suit_b": 0.0006888895992218978,
-    "fc_joker_w": 0.001601941003574161,
-    "fc_joker_b": 0.00035686714677360116
+  "fit_range": 16.0,
+  "layer_scales": {
+    "conv1": 1.0,
+    "conv2": 1.0,
+    "conv3": 0.29202925149568854,
+    "conv4": 0.12895164805109582,
+    "fc_shared": 0.08128158395899208,
+    "fc_rank": 0.15129489884573316,
+    "fc_suit": 0.26007000671395786,
+    "fc_joker": 0.11504158750930908
   },
-  "written": "2026-09-08 10:33:08",
+  "fcs_w_frac": 14,
+  "peak_activations_after_fit": {
+    "conv1": 3.4551095962524414,
+    "conv2": 11.771414756774902,
+    "conv3": 16.000003814697266,
+    "conv4": 15.999995231628418,
+    "fc_shared": 16.000003814697266,
+    "fc_rank": 16.000001907348633,
+    "fc_suit": 16.0000057220459,
+    "fc_joker": 15.999998092651367
+  },
+  "conv1_ch": 8,
+  "img_dw": 10,
+  "narrow_rom_bits": {
+    "conv3_w": 10,
+    "conv4_w": 10
+  },
+  "hps_header": {
+    "path": "../../LAB_5/fpga_cnn/workspace_lab3/M2/fcs_w_ddr.h",
+    "md5": "41e5130c089b7610aed31fe40e4b0550"
+  },
+  "written": "2026-09-27 02:33:06",
   "files": {
     "conv1_w.hex": {
       "count": 200,
-      "md5": "c5f2245b2ec2b9ffb37ee6d3ba256878"
+      "md5": "2c7c6ac0a60e38d47493d318fc099bad"
     },
     "conv1_b.hex": {
       "count": 8,
-      "md5": "bb91dcbc8e7e19fd616b48857c4c00df"
+      "md5": "f6c44fed3724b746ec03464e13da8612"
     },
     "conv2_w.hex": {
       "count": 3200,
-      "md5": "272db69c943096649d72c158a8ac4a18"
+      "md5": "0952b9455655e52bc7774e1581638485"
     },
     "conv2_b.hex": {
       "count": 16,
-      "md5": "ef23bd7462e8b7c19e2fee60e0ba1289"
+      "md5": "1f80db7aeb14caa2a50037575af2d68b"
+    },
+    "conv3_w.hex": {
+      "count": 6400,
+      "md5": "8e91b2aaa8bf4edbc42ce5e38c3aedb3"
+    },
+    "conv3_b.hex": {
+      "count": 16,
+      "md5": "5ca646b79a427948116e1ebc64b6f511"
+    },
+    "conv4_w.hex": {
+      "count": 6400,
+      "md5": "68182afc90ac31b967ed3219903d55e6"
+    },
+    "conv4_b.hex": {
+      "count": 16,
+      "md5": "426e9c16a9fae4b7b225b1f802ff857f"
     },
     "fcs_w.hex": {
       "count": 147520,
-      "md5": "702976876bf0d1d2517e34b528927d35"
+      "md5": "99d77f129621867cae24a819949df940"
     },
     "fcs_b.hex": {
       "count": 64,
-      "md5": "2a9b77695809c00df805bb97161ecfe6"
+      "md5": "b2e824ba8d05f0d81b3d7148b4b6ddfa"
     },
     "fcrank_w.hex": {
       "count": 832,
-      "md5": "08da1eeffabcbb0f83fd4f1a02722e69"
+      "md5": "c72dca91e767d8657ff0992fbf17bffd"
     },
     "fcrank_b.hex": {
       "count": 13,
-      "md5": "5459e12168d025919fe148501b1ff31a"
+      "md5": "85d8b062d8dff158245d79760c9c6e21"
     },
     "fcsuit_w.hex": {
       "count": 256,
-      "md5": "d4e46bd49ffddadb55f4d6bbd21a447a"
+      "md5": "284e6787ce783e81409669542c17f2f5"
     },
     "fcsuit_b.hex": {
       "count": 4,
-      "md5": "ee685fdf1f25a51261c865a463619bb1"
+      "md5": "ee276c3dcb41020c0594652785b67923"
     },
     "fcjoker_w.hex": {
       "count": 128,
-      "md5": "e1647a8bc2d73e61cc884dfea994c939"
+      "md5": "4f65f7bee8cc5b30c307fe4f97f1b4f3"
     },
     "fcjoker_b.hex": {
       "count": 2,
-      "md5": "5e79a8b408642448ef952d853bcdcab5"
+      "md5": "76c3a7b2f3f86b65b1027d60a04983a8"
     }
   }
 }

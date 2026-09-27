@@ -523,7 +523,7 @@ set_global_assignment -name USE_DLL_FREQUENCY_FOR_DQS_DELAY_CHAIN ON
 set_global_assignment -name UNIPHY_SEQUENCER_DQS_CONFIG_ENABLE ON
 set_global_assignment -name OPTIMIZE_MULTI_CORNER_TIMING ON
 set_global_assignment -name ECO_REGENERATE_REPORT ON
-set_location_assignment PIN_AH17 -to FPGA_RESET_N
+set_location_assignment PIN_AH17 -to KEY[0]
 # [stale: dead camera_hdmi_test port; pins now assigned to LED[]] set_location_assignment PIN_W15 -to FPGA_LED[0]
 # [stale: dead camera_hdmi_test port; pins now assigned to LED[]] set_location_assignment PIN_AA23 -to FPGA_LED[7]
 # [stale: dead camera_hdmi_test port; pins now assigned to LED[]] set_location_assignment PIN_Y16 -to FPGA_LED[6]
@@ -703,12 +703,14 @@ set_global_assignment -name VERILOG_FILE card_cnn/card_cnn_core.v
 set_global_assignment -name VERILOG_FILE card_cnn/conv_layer.v
 set_global_assignment -name VERILOG_FILE card_cnn/fc_layer.v
 set_global_assignment -name VERILOG_FILE card_cnn/maxpool_layer.v
+set_global_assignment -name VERILOG_FILE card_cnn/sdram_master.v
 set_global_assignment -name VERILOG_FILE ghrd_top.v
 set_global_assignment -name VERILOG_FILE ip/edge_detect/altera_edge_detector.v
 set_global_assignment -name VERILOG_FILE ip/debounce/debounce.v
 set_global_assignment -name VERILOG_FILE camera_test.v
 set_global_assignment -name VERILOG_FILE output_files/RESET_DELAY_HDMI.v
-set_global_assignment -name VERILOG_FILE downsample_96x96.v
+set_global_assignment -name VERILOG_FILE capture_384.v
 set_global_assignment -name VERILOG_FILE button_edge_detect.v
 set_global_assignment -name VERILOG_FILE camera_capture.v
+set_global_assignment -name VERILOG_FILE text_overlay.v
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

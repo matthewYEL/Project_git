@@ -6,40 +6,40 @@
     <stringAttribute key="ANDROID_APP_DIR" value=""/>
     <stringAttribute key="ANDROID_PROCESS_NAME" value=""/>
     <mapAttribute key="AverageDurationTracker">
-        <mapEntry key="*Fetching Data Model" value="3731475"/>
-        <mapEntry key="*list global low level symbols" value="3218213"/>
+        <mapEntry key="*Fetching Data Model" value="1218700"/>
+        <mapEntry key="*list global low level symbols" value="1234809"/>
         <mapEntry key="*loading values from target" value="40676000"/>
         <mapEntry key="*updating registers" value="157111300"/>
         <mapEntry key="*updating variables" value="2659125"/>
-        <mapEntry key="AddEventObserver" value="2739335"/>
-        <mapEntry key="Evaluate" value="7522342"/>
+        <mapEntry key="AddEventObserver" value="3736587"/>
+        <mapEntry key="Evaluate" value="9370997"/>
         <mapEntry key="Retrieving globals list" value="11722100"/>
         <mapEntry key="areCachesAvailable" value="576250"/>
-        <mapEntry key="compute execution mode" value="994184"/>
-        <mapEntry key="continue" value="10533712287"/>
+        <mapEntry key="compute execution mode" value="328916"/>
+        <mapEntry key="continue" value="21055777275"/>
         <mapEntry key="core" value="10797900"/>
-        <mapEntry key="disassemble" value="70426356"/>
-        <mapEntry key="get capabilities" value="392714"/>
-        <mapEntry key="get execution addresss" value="944818"/>
-        <mapEntry key="get source lines" value="1540303"/>
+        <mapEntry key="disassemble" value="38221290"/>
+        <mapEntry key="get capabilities" value="230812"/>
+        <mapEntry key="get execution addresss" value="177550"/>
+        <mapEntry key="get source lines" value="3179631"/>
         <mapEntry key="getValidEncodings" value="715650"/>
-        <mapEntry key="initialize command help" value="123483157"/>
+        <mapEntry key="initialize command help" value="53778862"/>
         <mapEntry key="interrupt" value="579447562"/>
-        <mapEntry key="list breakpoint options" value="2015382"/>
-        <mapEntry key="list breakpoints" value="2893309"/>
-        <mapEntry key="list instruction sets" value="3149451"/>
-        <mapEntry key="list signals" value="5093000"/>
-        <mapEntry key="list watchpoint options" value="2968096"/>
-        <mapEntry key="list watchpoints" value="1039470"/>
-        <mapEntry key="loadfile" value="69928039"/>
-        <mapEntry key="set CWD" value="8095956"/>
-        <mapEntry key="set debug-from" value="1799300"/>
-        <mapEntry key="source altera_target_check.py" value="853966120"/>
-        <mapEntry key="source semihost_cvav_setup.ds" value="1022142418"/>
-        <mapEntry key="start" value="132758873"/>
+        <mapEntry key="list breakpoint options" value="217579"/>
+        <mapEntry key="list breakpoints" value="444675"/>
+        <mapEntry key="list instruction sets" value="1040312"/>
+        <mapEntry key="list signals" value="877400"/>
+        <mapEntry key="list watchpoint options" value="591175"/>
+        <mapEntry key="list watchpoints" value="346262"/>
+        <mapEntry key="loadfile" value="137737512"/>
+        <mapEntry key="set CWD" value="4646750"/>
+        <mapEntry key="set debug-from" value="965504"/>
+        <mapEntry key="source altera_target_check.py" value="711651962"/>
+        <mapEntry key="source semihost_cvav_setup.ds" value="506110350"/>
+        <mapEntry key="start" value="59145188"/>
         <mapEntry key="stepi" value="23351156"/>
         <mapEntry key="target reset" value="4709265500"/>
-        <mapEntry key="waitForTargetToStop" value="93484046"/>
+        <mapEntry key="waitForTargetToStop" value="211230375"/>
     </mapAttribute>
     <stringAttribute key="CLOCK_SPEED" value="20kHz"/>
     <intAttribute key="DEBUG_TAB..RESOURCES.COUNT" value="0"/>
@@ -195,8 +195,6 @@
     <stringAttribute key="rvi_address" value="DE-SoC on localhost [USB-1]:DE-SoC USB-1"/>
     <mapAttribute key="scripts_view_script_links">
         <mapEntry key="C:\Program Files\Arm\Development Studio 2026.0-1\sw\debugger\configdb\Scripts\altera_target_check.py" value=""/>
-        <mapEntry key="C:\Users\mattb\Desktop\ECE4813\Project_git\Parent\fpga_cnn\workspace_lab3\Altera-SoCFPGA-HelloWorld-Baremetal-GNU\semihost_cvav_setup.ds" value=""/>
-        <mapEntry key="C:\Users\mattb\Downloads\LAB_5_cnn_96\LAB_5\fpga_cnn\workspace_lab3\Altera-SoCFPGA-HelloWorld-Baremetal-GNU\semihost_cvav_setup.ds" value=""/>
         <mapEntry key="C:\lab\soc_lab\cv_soc_lab\workspace_lab3\Altera-SoCFPGA-HelloWorld-Baremetal-GNU\semihost_cvav_setup.ds" value=""/>
     </mapAttribute>
     <listAttribute key="setup">

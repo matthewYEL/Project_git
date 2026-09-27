@@ -279,6 +279,11 @@
    internal="dipsw_pio.external_connection"
    type="conduit"
    dir="end" />
+ <interface
+   name="f2h_sdram0_data"
+   internal="hps_0.f2h_sdram0_data"
+   type="avalon"
+   dir="end" />
  <interface name="h2f_reset" internal="hps_0.h2f_reset" type="reset" dir="start" />
  <interface name="hps_io" internal="hps_0.hps_io" type="conduit" dir="end" />
  <interface
@@ -498,7 +503,7 @@
   <parameter name="EXPORT_AFI_HALF_CLK" value="false" />
   <parameter name="EXTRA_SETTINGS" value="" />
   <parameter name="F2H_AXI_CLOCK_FREQ" value="100" />
-  <parameter name="F2H_SDRAM0_CLOCK_FREQ" value="100" />
+  <parameter name="F2H_SDRAM0_CLOCK_FREQ" value="50000000" />
   <parameter name="F2H_SDRAM1_CLOCK_FREQ" value="100" />
   <parameter name="F2H_SDRAM2_CLOCK_FREQ" value="100" />
   <parameter name="F2H_SDRAM3_CLOCK_FREQ" value="100" />
@@ -511,8 +516,8 @@
   <parameter name="F2SCLK_SDRAMCLK_Enable" value="false" />
   <parameter name="F2SCLK_SDRAMCLK_FREQ" value="0" />
   <parameter name="F2SCLK_WARMRST_Enable" value="false" />
-  <parameter name="F2SDRAM_Type" value="" />
-  <parameter name="F2SDRAM_Width" value="" />
+  <parameter name="F2SDRAM_Type">Avalon-MM Bidirectional</parameter>
+  <parameter name="F2SDRAM_Width" value="32" />
   <parameter name="F2SINTERRUPT_Enable" value="false" />
   <parameter name="F2S_Width" value="0" />
   <parameter name="FIX_READ_LATENCY" value="8" />
@@ -1047,7 +1052,7 @@
   <parameter name="resetValue" value="0" />
   <parameter name="simDoTestBenchWiring" value="false" />
   <parameter name="simDrivenValue" value="0" />
-  <parameter name="width" value="14" />
+  <parameter name="width" value="18" />
  </module>
  <module
    name="snapshot_data_pio"
@@ -1229,6 +1234,11 @@
    version="25.1"
    start="clk_0.clk"
    end="hps_0.h2f_lw_axi_clock" />
+ <connection
+   kind="clock"
+   version="25.1"
+   start="clk_0.clk"
+   end="hps_0.f2h_sdram0_clock" />
  <connection
    kind="reset"
    version="25.1"
