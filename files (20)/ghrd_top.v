@@ -141,6 +141,23 @@ module ghrd_top (
   wire        camera_trigger_wire;
   wire        snapshot_done_w, snapshot_colour_w;
 
+  // ---------- DDR3 frame buffer: Avalon-MM master, camera_capture -> ddr3_fram
+  // -> hps_0.f2h_sdram0_data. avm_clk/avm_rst reuse fpga_clk_50/hps_fpga_reset_n
+  // because Platform Designer's f2h_sdram0_clock is wired from the same
+  // clk_0 source in step 6 of DDR3_FRAME_BUFFER_NOTES.md -- if that
+  // connection is ever changed to a different clock, this must change too.
+  wire [29:0] avm_address;
+  wire [7:0]  avm_burstcount;
+  wire        avm_read, avm_write;
+  wire [31:0] avm_writedata, avm_readdata;
+  wire [3:0]  avm_byteenable;
+  wire        avm_waitrequest, avm_readdatavalid;
+  // Both LED[7:0] bits are already spoken for above (dbg_ready_latched,
+  // dbg_hdmi_int, dbg_lut_index, dbg_ack). No spare LED to put these on --
+  // route them out through a spare PIO or read them with SignalTap instead
+  // of silently leaving them unmonitored.
+  wire [15:0] dbg_rd_underrun, dbg_wr_overflow;
+
 soc_system soc_inst (
   .memory_mem_a                         (hps_memory_mem_a),
   .memory_mem_ba                        (hps_memory_mem_ba),
@@ -221,7 +238,24 @@ soc_system soc_inst (
   .camera_capture_trigger_pio_external_connection_export (camera_trigger_wire),
   .img_wr_addr_pio_external_connection_export (img_wr_addr_wire),
   .img_wr_data_pio_external_connection_export (img_wr_data_wire),
-  .img_wr_ctrl_pio_external_connection_export (img_wr_ctrl_wire)
+  .img_wr_ctrl_pio_external_connection_export (img_wr_ctrl_wire),
+
+  // ---------- DDR3 frame buffer: f2h_sdram0_data ----------
+  // Does not exist in soc_system.v until Platform Designer's F2H SDRAM
+  // Interface (port 0) is enabled and exported -- see
+  // DDR3_FRAME_BUFFER_NOTES.md step 6. Port names below are Platform
+  // Designer's default naming for an export named "f2h_sdram0_data";
+  // confirm against the regenerated soc_system.v, same check the rest of
+  // this project already applies to every other conduit/export name.
+  .f2h_sdram0_data_address      (avm_address),
+  .f2h_sdram0_data_burstcount   (avm_burstcount),
+  .f2h_sdram0_data_read         (avm_read),
+  .f2h_sdram0_data_write        (avm_write),
+  .f2h_sdram0_data_writedata    (avm_writedata),
+  .f2h_sdram0_data_byteenable   (avm_byteenable),
+  .f2h_sdram0_data_waitrequest  (avm_waitrequest),
+  .f2h_sdram0_data_readdata     (avm_readdata),
+  .f2h_sdram0_data_readdatavalid(avm_readdatavalid)
 );
 
 debounce debounce_inst (
@@ -288,31 +322,26 @@ debounce debounce_inst (
 
   assign cnn_result_wire = {rank_score, 6'b0, snap_done_sync[1], colour_lat, done_sticky, is_joker, suit_idx, rank_idx};
 
-  // Latch a stable copy of the classification whenever a new one completes
-  // (~52 ms apart), toggling a flag alongside it. camera_capture's VGA_CLK
-  // domain double-flops the toggle and only samples rank/suit/joker on its
-  // edge -- by then the data has been stable for a whole inference, so this
-  // is a safe slow-changing CDC (same pattern as vs_count/wde_ticks above,
-  // just crossing the other direction) for the HDMI on-screen prediction.
-  reg [3:0] disp_rank_r;
-  reg [1:0] disp_suit_r;
-  reg       disp_joker_r;
-  reg       disp_toggle_r;
-  always @(posedge fpga_clk_50) begin
-    if (core_done) begin
-      disp_rank_r   <= rank_idx;
-      disp_suit_r   <= suit_idx;
-      disp_joker_r  <= is_joker;
-      disp_toggle_r <= ~disp_toggle_r;
-    end
-  end
-
   // ---------- 新增：例化摄像头模块 ----------
   camera_capture u_camera (
       .clk50               (fpga_clk_50),
       .clk2_50             (FPGA_CLK2_50),
       .rst_n               (hps_fpga_reset_n),
       .capture_trigger_in  (camera_trigger_wire),
+
+      .avm_clk               (fpga_clk_50),
+      .avm_rst               (~hps_fpga_reset_n),
+      .avm_address           (avm_address),
+      .avm_burstcount        (avm_burstcount),
+      .avm_read              (avm_read),
+      .avm_write             (avm_write),
+      .avm_writedata         (avm_writedata),
+      .avm_byteenable        (avm_byteenable),
+      .avm_waitrequest       (avm_waitrequest),
+      .avm_readdata          (avm_readdata),
+      .avm_readdatavalid     (avm_readdatavalid),
+      .dbg_rd_underrun       (dbg_rd_underrun),
+      .dbg_wr_overflow       (dbg_wr_overflow),
 
       .HDMI_I2C_SCL(HDMI_I2C_SCL), .HDMI_I2C_SDA(HDMI_I2C_SDA),
       .HDMI_I2S(HDMI_I2S), .HDMI_LRCLK(HDMI_LRCLK),
@@ -337,10 +366,7 @@ debounce debounce_inst (
       .hps_rd_addr(snapshot_addr_wire),
       .hps_rd_data(snapshot_data_wire),
       .snapshot_done(snapshot_done_w),
-      .snapshot_colour(snapshot_colour_w),
-
-      .cnn_disp_rank(disp_rank_r), .cnn_disp_suit(disp_suit_r),
-      .cnn_disp_joker(disp_joker_r), .cnn_disp_toggle(disp_toggle_r)
+      .snapshot_colour(snapshot_colour_w)
   );
 
 endmodule

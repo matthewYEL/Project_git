@@ -4,6 +4,26 @@ module camera_capture (
     input  wire        rst_n,             // 来自ghrd_top的hps_fpga_reset_n
     input  wire        capture_trigger_in, // 来自HPS的PIO触发（替代物理按钮）
 
+    // DDR3 frame buffer -- Avalon-MM master to hps_0.f2h_sdram0_data.
+    // avm_clk/avm_rst come from the same clk_0/fpga_clk_50 source that
+    // hps_0.f2h_sdram0_clock is wired to in Platform Designer (see
+    // DDR3_FRAME_BUFFER_NOTES step 6) -- NOT clk50 by coincidence of name,
+    // by requirement: the two must be the same net or the write/read paths
+    // desync from the arbiter.
+    input  wire        avm_clk,
+    input  wire        avm_rst,
+    output wire [29:0] avm_address,
+    output wire [7:0]  avm_burstcount,
+    output wire        avm_read,
+    output wire        avm_write,
+    output wire [31:0] avm_writedata,
+    output wire [3:0]  avm_byteenable,
+    input  wire        avm_waitrequest,
+    input  wire [31:0] avm_readdata,
+    input  wire        avm_readdatavalid,
+    output wire [15:0] dbg_rd_underrun,
+    output wire [15:0] dbg_wr_overflow,
+
     // HDMI
     inout  wire        HDMI_I2C_SCL, inout wire HDMI_I2C_SDA,
     inout  wire        HDMI_I2S, inout wire HDMI_LRCLK,
@@ -37,14 +57,7 @@ module camera_capture (
     input  wire [11:0] hps_rd_addr,
     output wire [15:0] hps_rd_data,
     output wire        snapshot_done,
-    output wire        snapshot_colour,   // 1 = red card (hardware detector), latched with the snapshot
-
-    // CNN prediction, for the HDMI on-screen text. Driven from ghrd_top's
-    // fpga_clk_50 domain; see the toggle-CDC comment where it is sampled below.
-    input  wire [3:0]  cnn_disp_rank,
-    input  wire [1:0]  cnn_disp_suit,
-    input  wire        cnn_disp_joker,
-    input  wire        cnn_disp_toggle
+    output wire        snapshot_colour    // 1 = red card (hardware detector), latched with the snapshot
 );
 
     wire RESET_N, RESET_N_DELAY;
@@ -80,141 +93,6 @@ module camera_capture (
     always @(posedge VGA_CLK) edge_sr <= {edge_sr[2:0], crop_edge};
     wire crop_edge_d = edge_sr[3];
 
-    // ---------- HDMI on-screen prediction text ----------
-    // cnn_disp_* come from ghrd_top's fpga_clk_50 domain, latched once per
-    // completed inference (~52 ms apart) with cnn_disp_toggle flipping
-    // alongside them. That gap is far longer than any VGA_CLK period, so a
-    // plain 3-flop synchronizer on the toggle, followed by sampling the
-    // already-stable data on its edge, is a safe CDC here.
-    reg [2:0] disp_tog_sync;
-    always @(posedge VGA_CLK) disp_tog_sync <= {disp_tog_sync[1:0], cnn_disp_toggle};
-    wire disp_tog_edge = disp_tog_sync[1] ^ disp_tog_sync[2];
-
-    reg [3:0] rank_v;
-    reg [1:0] suit_v;
-    reg       joker_v;
-    // have_result's only other assignment is 1'b1 with no way back to 0, so
-    // without this reset Quartus proves it converges to a constant and
-    // folds/removes it ("stuck at VCC due to stuck port data_in", same trap
-    // the wde_ticks comment above already documents for a different signal).
-    reg       have_result;
-    always @(posedge VGA_CLK or negedge RESET_N) begin
-        if (!RESET_N) begin
-            have_result <= 1'b0;
-        end else if (disp_tog_edge) begin
-            rank_v      <= cnn_disp_rank;
-            suit_v      <= cnn_disp_suit;
-            joker_v     <= cnn_disp_joker;
-            have_result <= 1'b1;
-        end
-    end
-
-    // Left-justified 5-character field: "JOKER", "<rank><suit>" (2-3 chars,
-    // e.g. "AS", "10D" -- same rank/suit encoding atlas_main.c's RANK_NAMES/
-    // SUIT_NAMES decode), or all-blank before the first result.
-    reg [7:0] suit_ch;
-    always @(*) case (suit_v)
-        2'd0: suit_ch = "S";
-        2'd1: suit_ch = "C";
-        2'd2: suit_ch = "H";
-        default: suit_ch = "D";
-    endcase
-
-    reg [7:0] disp_ch0, disp_ch1, disp_ch2, disp_ch3, disp_ch4;
-    always @(*) begin
-        disp_ch0 = " "; disp_ch1 = " "; disp_ch2 = " ";
-        disp_ch3 = " "; disp_ch4 = " ";
-        if (have_result) begin
-            if (joker_v) begin
-                disp_ch0 = "J"; disp_ch1 = "O"; disp_ch2 = "K";
-                disp_ch3 = "E"; disp_ch4 = "R";
-            end else begin
-                case (rank_v)
-                    4'd0:  disp_ch0 = "2";
-                    4'd1:  disp_ch0 = "3";
-                    4'd2:  disp_ch0 = "4";
-                    4'd3:  disp_ch0 = "5";
-                    4'd4:  disp_ch0 = "6";
-                    4'd5:  disp_ch0 = "7";
-                    4'd6:  disp_ch0 = "8";
-                    4'd7:  disp_ch0 = "9";
-                    4'd8:  begin disp_ch0 = "1"; disp_ch1 = "0"; end
-                    4'd9:  disp_ch0 = "J";
-                    4'd10: disp_ch0 = "Q";
-                    4'd11: disp_ch0 = "K";
-                    default: disp_ch0 = "A";            // 4'd12
-                endcase
-                if (rank_v == 4'd8) disp_ch2 = suit_ch;  // "10" already used slots 0-1
-                else                disp_ch1 = suit_ch;
-            end
-        end
-    end
-
-    // 5 cells x 16x16 px (8x8 font, 2x scale), centred over 640, in the
-    // black margin above the camera window (which starts at cur_y 120).
-    localparam [10:0] TEXT_X0 = 11'd280;
-    localparam [10:0] TEXT_Y0 = 11'd20;
-    wire [10:0] text_dx = cur_x - TEXT_X0;
-    wire [10:0] text_dy = cur_y - TEXT_Y0;
-    wire text_area  = (cur_x >= TEXT_X0) && (text_dx < 11'd80) &&
-                       (cur_y >= TEXT_Y0) && (text_dy < 11'd16);
-    wire [2:0] cell_idx  = text_dx[6:4];   // /16 -> 0..4
-    wire [2:0] glyph_col = text_dx[3:1];   // 2x scale
-    wire [2:0] glyph_row = text_dy[3:1];
-
-    reg [7:0] cell_ch;
-    always @(*) case (cell_idx)
-        3'd0: cell_ch = disp_ch0;
-        3'd1: cell_ch = disp_ch1;
-        3'd2: cell_ch = disp_ch2;
-        3'd3: cell_ch = disp_ch3;
-        default: cell_ch = disp_ch4;
-    endcase
-
-    wire [7:0] glyph_bits = font8x8_row(cell_ch, glyph_row);
-    wire text_pixel = text_area && glyph_bits[7 - glyph_col];
-
-    reg [3:0] text_sr;
-    always @(posedge VGA_CLK) text_sr <= {text_sr[2:0], text_pixel};
-    wire text_pixel_d = text_sr[3];
-
-    // Minimal 8x8 font, only the glyphs the overlay can ever need: digits,
-    // rank letters (J/Q/K/A), suit letters (S/C/H/D), and JOKER's O/E/R.
-    // Row 7 (and anything unrecognised) is blank -- that's the font's own
-    // line-spacing row, not a missing-glyph fallback.
-    function [7:0] font8x8_row;
-        input [7:0] ascii;
-        input [2:0] row;
-        reg   [7:0] r;
-        begin
-            case (ascii)
-                "0": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h6E; 3'd3:r=8'h76; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "1": case(row) 3'd0:r=8'h18; 3'd1:r=8'h18; 3'd2:r=8'h38; 3'd3:r=8'h18; 3'd4:r=8'h18; 3'd5:r=8'h18; 3'd6:r=8'h7E; default:r=8'h00; endcase
-                "2": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h06; 3'd3:r=8'h0C; 3'd4:r=8'h30; 3'd5:r=8'h60; 3'd6:r=8'h7E; default:r=8'h00; endcase
-                "3": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h06; 3'd3:r=8'h1C; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "4": case(row) 3'd0:r=8'h0C; 3'd1:r=8'h1C; 3'd2:r=8'h2C; 3'd3:r=8'h4C; 3'd4:r=8'h7E; 3'd5:r=8'h0C; 3'd6:r=8'h0C; default:r=8'h00; endcase
-                "5": case(row) 3'd0:r=8'h7E; 3'd1:r=8'h60; 3'd2:r=8'h7C; 3'd3:r=8'h06; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "6": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h60; 3'd3:r=8'h7C; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "7": case(row) 3'd0:r=8'h7E; 3'd1:r=8'h06; 3'd2:r=8'h0C; 3'd3:r=8'h18; 3'd4:r=8'h30; 3'd5:r=8'h30; 3'd6:r=8'h30; default:r=8'h00; endcase
-                "8": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h3C; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "9": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h3E; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "A": case(row) 3'd0:r=8'h18; 3'd1:r=8'h3C; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h7E; 3'd5:r=8'h66; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "C": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h60; 3'd3:r=8'h60; 3'd4:r=8'h60; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "D": case(row) 3'd0:r=8'h78; 3'd1:r=8'h6C; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h66; 3'd5:r=8'h6C; 3'd6:r=8'h78; default:r=8'h00; endcase
-                "E": case(row) 3'd0:r=8'h7E; 3'd1:r=8'h60; 3'd2:r=8'h60; 3'd3:r=8'h7C; 3'd4:r=8'h60; 3'd5:r=8'h60; 3'd6:r=8'h7E; default:r=8'h00; endcase
-                "H": case(row) 3'd0:r=8'h66; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h7E; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "J": case(row) 3'd0:r=8'h1E; 3'd1:r=8'h0C; 3'd2:r=8'h0C; 3'd3:r=8'h0C; 3'd4:r=8'h0C; 3'd5:r=8'h6C; 3'd6:r=8'h38; default:r=8'h00; endcase
-                "K": case(row) 3'd0:r=8'h66; 3'd1:r=8'h6C; 3'd2:r=8'h78; 3'd3:r=8'h70; 3'd4:r=8'h78; 3'd5:r=8'h6C; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "O": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "Q": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h6E; 3'd5:r=8'h6C; 3'd6:r=8'h36; default:r=8'h00; endcase
-                "R": case(row) 3'd0:r=8'h7C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h7C; 3'd4:r=8'h6C; 3'd5:r=8'h66; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "S": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h60; 3'd3:r=8'h3C; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                default: r = 8'h00;
-            endcase
-            font8x8_row = r;
-        end
-    endfunction
-
     assign CAMERA_PWDN_n = 1'b1;
     assign MIPI_CS_n     = 1'b0;
     assign MIPI_RESET_n  = RESET_N;
@@ -236,11 +114,18 @@ module camera_capture (
     AUDIO_PLL pll1 (.refclk(clk50), .rst(1'b0), .outclk_0(AUD_CTRL_CLK), .locked(PLL_TEST_OK));
     VIDEO_PLL pll2 (.refclk(clk2_50), .rst(1'b0), .outclk_0(MIPI_REFCLK), .outclk_1(VGA_CLK));
 
-    ON_CHIP_FRAM fra (
+    ddr3_fram fra (
         .W_CLK(MIPI_PIXEL_CLK), .W_DE(MIPI_PIXEL_HS & MIPI_PIXEL_VS),
         .W_DATA(MIPI_PIXEL_D[9:0]), .W_CLR(MIPI_PIXEL_VS),
         .R_CLK(VGA_CLK), .R_DATA(RD_DATA), .R_CLR(VGA_VS), .R_DE(disp_win),
-        .WR_ADDR(WR_ADDR), .RD_ADDR(RD_ADDR)
+        .WR_ADDR(WR_ADDR), .RD_ADDR(RD_ADDR),
+        .avm_clk(avm_clk), .avm_rst(avm_rst),
+        .avm_address(avm_address), .avm_burstcount(avm_burstcount),
+        .avm_read(avm_read), .avm_write(avm_write),
+        .avm_writedata(avm_writedata), .avm_byteenable(avm_byteenable),
+        .avm_waitrequest(avm_waitrequest), .avm_readdata(avm_readdata),
+        .avm_readdatavalid(avm_readdatavalid),
+        .dbg_rd_underrun(dbg_rd_underrun), .dbg_wr_overflow(dbg_wr_overflow)
     );
 
     RAW2RGB_J u4 (
@@ -274,9 +159,8 @@ module camera_capture (
     assign dbg_hdmi_int = HDMI_TX_INT;
 
     assign HDMI_TX_CLK = VGA_CLK;
-    assign HDMI_TX_D   = crop_edge_d  ? 24'h00FF00 :                   // green crop box
-                         text_pixel_d ? 24'hFFFFFF :                   // predicted card, top margin
-                         disp_win_d   ? {RED, GREEN, BLUE} : 24'd0;
+    assign HDMI_TX_D   = crop_edge_d ? 24'h00FF00 :                    // green crop box
+                         disp_win_d  ? {RED, GREEN, BLUE} : 24'd0;
     assign HDMI_TX_DE  = READ_Request;      // full 640x480 active area for the monitor
     assign HDMI_TX_HS  = VGA_HS;
     assign HDMI_TX_VS  = VGA_VS;

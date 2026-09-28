@@ -10,13 +10,6 @@ Parent/fpga_cnn/timing/
 Parent/fpga_cnn/.qsys_edit/
 Parent/fpga_cnn/qsys_edit.tcl
 
-# Quartus output dir - drop artifacts, keep any HDL source placed there
-Parent/fpga_cnn/output_files/*
-!Parent/fpga_cnn/output_files/*.v
-!Parent/fpga_cnn/output_files/*.sv
-!Parent/fpga_cnn/output_files/*.vhd
-!Parent/fpga_cnn/output_files/*.vhdl
-
 # ---------------- Qsys / Platform Designer / SoC ----------------
 Parent/fpga_cnn/hps_isw_handoff/
 Parent/fpga_cnn/ip_upgrade_port_diff_reports/
@@ -50,6 +43,11 @@ PLLJ_PLLSPE_INFO.txt
 *.rbf
 *.jic
 *.svf
+
+# Track Parent/fpga_cnn/output_files/ in full (reports + .sof), overriding
+# the blanket extension ignores above for this directory only -- other
+# Quartus/solution dirs elsewhere in the repo keep ignoring these extensions.
+!Parent/fpga_cnn/output_files/**
 
 # ---------------- Editor / OS / backups ----------------
 *.bak
