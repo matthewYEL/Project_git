@@ -37,6 +37,7 @@
  */
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -69,7 +70,9 @@ struct job_req
 };
 
 /* Only REPORT_RESULT is answered with the notification Vision waits on. */
-enum { REPORT_RESULT, REPORT_BUSY, REPORT_JOB_START, REPORT_UNDO, REPORT_CLEAR };
+enum { REPORT_RESULT, REPORT_BUSY, REPORT_JOB_START, REPORT_UNDO, REPORT_CLEAR, REPORT_CMD };
+
+#define CMD_MAX         8                   /* an operator command line, NUL included */
 
 struct report_msg
 {
@@ -79,6 +82,7 @@ struct report_msg
     uint32_t                     shot;
     unsigned                     sw;
     const struct vision_result * res;   /* stays valid until Report notifies Vision */
+    char                         cmd[ CMD_MAX ];    /* REPORT_CMD: the typed line */
 };
 
 static QueueHandle_t xJobs;         /* Input  -> Vision, depth 1 */
@@ -98,9 +102,40 @@ static uint32_t ulJobsCore1, ulJobsCore0;
  * full, the message is dropped rather than stalling input or vision. */
 static void prvPost( uint8_t ucKind, uint32_t ulShot, uint8_t ucOnCore1 )
 {
-    struct report_msg xMsg = { ucKind, ucOnCore1, 0, ulShot, 0, NULL };
+    struct report_msg xMsg = { ucKind, ucOnCore1, 0, ulShot, 0, NULL, { 0 } };
 
     xQueueSend( xReports, &xMsg, 0 );
+}
+
+/* Gather the operator's typed characters (UART) into a line; Enter posts it to
+ * Report, which owns the grid and the display. Backspace edits; anything past
+ * CMD_MAX - 1 characters is dropped. */
+static void prvPollCommand( char * pcLine, unsigned * puLen )
+{
+    int iCh;
+
+    while( ( iCh = uart_getc() ) >= 0 )
+    {
+        if( iCh == '\r' || iCh == '\n' )
+        {
+            if( *puLen )
+            {
+                struct report_msg xMsg = { REPORT_CMD, 0, 0, 0, 0, NULL, { 0 } };
+
+                memcpy( xMsg.cmd, pcLine, *puLen );
+                xQueueSend( xReports, &xMsg, 0 );
+                *puLen = 0;
+            }
+        }
+        else if( ( iCh == 0x08 || iCh == 0x7F ) && *puLen )
+        {
+            ( *puLen )--;
+        }
+        else if( iCh > ' ' && iCh < 0x7F && *puLen < CMD_MAX - 1u )
+        {
+            pcLine[ ( *puLen )++ ] = ( char ) iCh;
+        }
+    }
 }
 
 /* ---- tasks -------------------------------------------------------------- */
@@ -111,11 +146,15 @@ static void prvInputTask( void * pvParameters )
     TickType_t xLastIssued = xTaskGetTickCount();
     TickType_t xKey1Down   = 0;
     int        iKey1Timing = 0;
+    char       acLine[ CMD_MAX ];
+    unsigned   uLineLen    = 0;
 
     ( void ) pvParameters;
 
     for( ;; )
     {
+        prvPollCommand( acLine, &uLineLen );
+
         /* Presses are latched in button_pio's edge-capture register, so one
          * made while CPU0 was halted in a semihosted printf is still here. */
         unsigned uPressed = key_presses();
@@ -245,6 +284,18 @@ static void prvPrintStats( void )
             xCore1Lost ? "   ! CPU1 stopped answering" : "" );
 }
 
+static void prvPrintHelp( void )
+{
+    printf( "  commands (type, then Enter):\n"
+            "    3 / 4 / 5     new face-up scan of that size (rubric rounds 1-2)\n"
+            "    g3 / g4 / g5  new face-down game (round 3): teams alternate\n"
+            "    a1 .. e5      the cell the next read goes to (column letter, row number)\n"
+            "    r             start this board again\n"
+            "  KEY0 reads the card at the green box into the cell the display names;\n"
+            "  KEY1 tap undoes the last read, hold %u ms for a new board.\n",
+            ( unsigned ) KEY1_CLEAR_MS );
+}
+
 static void prvReportTask( void * pvParameters )
 {
     uint32_t ulResults = 0;
@@ -285,6 +336,15 @@ static void prvReportTask( void * pvParameters )
         if( xMsg.kind == REPORT_CLEAR )
         {
             gui_clear();
+            continue;
+        }
+        if( xMsg.kind == REPORT_CMD )
+        {
+            printf( "> %s\n", xMsg.cmd );
+            if( !gui_command( xMsg.cmd ) )
+            {
+                prvPrintHelp();
+            }
             continue;
         }
 
@@ -376,11 +436,13 @@ int rtos_main( void )
 
     printf( "  tasks: Input(p%d) -> Vision(p%d) -> Report(p%d)\n",
             INPUT_PRIO, VISION_PRIO, REPORT_PRIO );
-    printf( "snapshot mode -- press KEY0 to capture and classify; the HDMI dashboard\n"
-            "tracks each card. KEY1 undoes the newest one (hold %u ms: clear them all).\n"
+    printf( "grid mode -- the HDMI names the next cell: show that card at the green box\n"
+            "and press KEY0. Starts as a face-up 3x3 scan.\n"
             "SW0 = ASCII preview, SW1 = PGM dump, SW2 = scheduling stats,\n"
-            "SW3 = auto-capture every %u ms, shown but not tracked (SW0+SW3 = ASCII viewfinder).\n\n",
-            ( unsigned ) KEY1_CLEAR_MS, ( unsigned ) AUTO_PERIOD_MS );
+            "SW3 = auto-capture every %u ms, shown but never placed (SW0+SW3 = ASCII viewfinder).\n",
+            ( unsigned ) AUTO_PERIOD_MS );
+    prvPrintHelp();
+    printf( "\n" );
 
     vTaskStartScheduler();
 

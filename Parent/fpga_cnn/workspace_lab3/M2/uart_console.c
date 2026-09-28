@@ -60,4 +60,25 @@ int _write(int fd, const void *buf, size_t len)
     return (int)len;
 }
 
+/* One received character, or -1 if none is waiting -- never blocks. The Input
+ * task polls it for the operator's command lines; only it reads the RX side. */
+int uart_getc(void)
+{
+    uint32_t level = 0;
+    char     c;
+
+    if (!uart0_ok || alt_16550_fifo_level_get_rx(&uart0, &level) != ALT_E_SUCCESS || level == 0)
+        return -1;
+    if (alt_16550_fifo_read(&uart0, &c, 1) != ALT_E_SUCCESS)
+        return -1;
+    return (unsigned char)c;
+}
+
+#else /* PRINTF_HOST: the console is the debugger's, which has no input here */
+
+int uart_getc(void)
+{
+    return -1;
+}
+
 #endif /* !PRINTF_HOST */

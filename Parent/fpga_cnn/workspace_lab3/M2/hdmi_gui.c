@@ -7,14 +7,12 @@
  *                          it is the fabric's (camera_capture.v PV_X/PV_Y =
  *                          exactly cells 1..40 x 2..16); the layer only frames
  *                          it, and must leave those cells blank.
- *   rows 1-10   cols 44-78 LAST CARD: the card, pips laid out as printed, and
- *                          its numbers
- *   rows 12-17  cols 44-72 TABLE: seen / unseen / repeats / jokers / reads
  *   row  18                aiming hint
- *   rows 19-24             THE BOARD: the last 5 tracked cards, dealt left to
- *                          right (face down until read), a marker over the newest
- *   rows 25-28             the deck, 4 suits x 13 ranks: a chip turns white
- *                          once seen, brass if seen more than once
+ *   rows 19-28  cols 1-41  the prompt (what to do next), then the round's
+ *                          progress: pairs found, or turn / team / scores
+ *   rows 1-28   cols 43-78 THE GRID: the N x N board (grid.c), card size
+ *                          scaled to N -- empty slots, the next cell in brass,
+ *                          cards face up, pairs on brass faces, backs face down
  *   row  29                rail: key / switch help
  *
  * The colours are text_overlay.v's CGA palette, so a new look needs no
@@ -33,6 +31,7 @@
 
 #include "app_config.h"
 #include "card_pipeline.h"
+#include "grid.h"
 #include "hdmi_gui.h"
 
 #ifdef GUI_HOST
@@ -59,32 +58,27 @@ void alt_write_word( uint32_t addr, uint32_t value );   /* gui_host_test.c emula
 #define CAM_COL     0
 #define CAM_H       17
 #define CAM_W       42
-#define LAST_ROW    1               /* plate; the card is the BIG_H rows under it */
-#define LAST_COL    44
-#define INFO_COL    59              /* the card's numbers, to column 78 */
-#define INFO_W      ( COLS - 1 - INFO_COL )
-#define STAT_ROW    12              /* plate; five lines under it */
-#define STAT_COL    44
 #define HINT_ROW    18
-#define BOARD_ROW   19              /* plate + line; the cards are the MINI_H rows under it */
-#define BOARD_LINE  15              /* where the line starts, after the plate */
-#define BOARD_N     5
-#define BOARD_STEP  9               /* MINI_W + a 2-cell gap */
-#define BOARD_COL   ( ( COLS - ( BOARD_N * BOARD_STEP - 2 ) ) / 2 )
-#define DECK_ROW    25
-#define DECK_COL    ( ( COLS - ( 4 + 13 * 4 - 1 ) ) / 2 )   /* suit chip, then 13 rank chips 4 apart */
+#define INFO_ROW    19              /* the prompt plate; the round's lines under it */
+#define INFO_COL    2
+#define INFO_W      39
+#define GRID_ROW    1               /* plate; column letters and the cards under it */
+#define GRID_COL    43              /* the panel runs to column 78 */
 #define STATUS_COL  50              /* the status pill is right-aligned in columns 50..78 */
 #define STATUS_MAX  ( COLS - 3 - STATUS_COL )
 
-/* card sizes in cells: with 8x16 px cells both are a card's 5:7 */
-#define BIG_W       13
-#define BIG_H       9
-#define MINI_W      7
-#define MINI_H      5
+/* card size and pitch in cells by N = 3, 4, 5 (8x16 px cells, so all three are
+ * card-shaped), and the panel's card area: columns 46..78, rows 3..28 */
+static const struct { int w, h, px, py; } GEO[ 3 ] = {
+    { 9, 7, 11, 8 }, { 7, 5, 8, 6 }, { 5, 4, 6, 5 },
+};
+#define AREA_COL    46
+#define AREA_W      33
+#define AREA_ROW    3
+#define AREA_H      26
 
 /* CP437 */
 #define CH_SMILE    0x01
-#define CH_CHIP     0x0A            /* inverse circle: a poker chip */
 #define CH_DOWN     0x1F
 #define CH_SHADE    0xB1            /* card back pattern */
 #define CH_LOWER    0xDC            /* lower half block */
@@ -100,46 +94,24 @@ void alt_write_word( uint32_t addr, uint32_t value );   /* gui_host_test.c emula
 static const unsigned char SUIT_CH[4] = { 0x06, 0x05, 0x03, 0x04 };
 #define SUIT_RED(s) ( ( s ) >= 2u )
 
-/* Where a printed card puts its pips, by rank index (2..10, J, Q, K, A): face
- * rows 1..7 x columns left / centre / right. The courts have none -- they get
- * a framed letter instead. */
-#define P( r, c )   ( 1ul << ( ( ( r ) - 1 ) * 3 + ( c ) ) )
-static const unsigned long PIPS[ 13 ] = {
-    P( 1, 1 ) | P( 7, 1 ),                                                          /* 2  */
-    P( 1, 1 ) | P( 4, 1 ) | P( 7, 1 ),                                              /* 3  */
-    P( 1, 0 ) | P( 1, 2 ) | P( 7, 0 ) | P( 7, 2 ),                                  /* 4  */
-    P( 1, 0 ) | P( 1, 2 ) | P( 4, 1 ) | P( 7, 0 ) | P( 7, 2 ),                      /* 5  */
-    P( 1, 0 ) | P( 1, 2 ) | P( 4, 0 ) | P( 4, 2 ) | P( 7, 0 ) | P( 7, 2 ),          /* 6  */
-    P( 1, 0 ) | P( 1, 2 ) | P( 2, 1 ) | P( 4, 0 ) | P( 4, 2 ) | P( 7, 0 ) | P( 7, 2 ),              /* 7 */
-    P( 1, 0 ) | P( 1, 2 ) | P( 2, 1 ) | P( 4, 0 ) | P( 4, 2 ) | P( 6, 1 ) | P( 7, 0 ) | P( 7, 2 ),  /* 8 */
-    P( 1, 0 ) | P( 1, 2 ) | P( 3, 0 ) | P( 3, 2 ) | P( 4, 1 ) | P( 5, 0 ) | P( 5, 2 ) |
-        P( 7, 0 ) | P( 7, 2 ),                                                      /* 9  */
-    P( 1, 0 ) | P( 1, 2 ) | P( 2, 1 ) | P( 3, 0 ) | P( 3, 2 ) | P( 5, 0 ) | P( 5, 2 ) |
-        P( 6, 1 ) | P( 7, 0 ) | P( 7, 2 ),                                          /* 10 */
-    0, 0, 0,                                                                        /* J Q K */
-    P( 4, 1 ),                                                                      /* A  */
-};
+static struct grid g;               /* the board being played */
 
-/* ponytail: the history keeps the last HIST_MAX tracked cards, and the board,
- * the deck and the counts are recomputed from it on every redraw, so an undo
- * can never leave them disagreeing. Past HIST_MAX the oldest cards drop off;
- * 256 is about five decks. Raise it, or keep separate counts, if a run is ever
- * longer. */
-#define HIST_MAX    256
+/* ponytail: KEY1 undoes the last UNDO_MAX reads by restoring whole snapshots of
+ * the board -- simple and exact, ~3 KB. Deeper history, if a run ever needs it,
+ * is a bigger ring. */
+#define UNDO_MAX    8
+static struct grid undo_ring[ UNDO_MAX ];
+static unsigned    undo_head, n_undo;
 
-struct det
+struct det                          /* the latest read, for the INFO panel */
 {
-    uint32_t     result;        /* raw cnn_result word */
-    uint32_t     red_count;
-    uint32_t     inf_ms;
+    uint32_t     result;
     unsigned     shot;
-    const char * where;         /* "CPU1" / "CPU0" / NULL */
+    const char * where;             /* "CPU1" / "CPU0" / NULL */
+    int          placed;            /* the cell it went to, -1 = none (auto / rejected) */
 };
-
-static struct det hist[ HIST_MAX ];
-static unsigned   n_hist;
-static struct det last;         /* LAST CARD: the newest tracked card, or an auto capture */
-static int        last_valid, last_auto;
+static struct det last;
+static int        last_valid;
 
 /* ---- drawing primitives ------------------------------------------------- */
 
@@ -202,14 +174,14 @@ static void card_shape( int row, int col, int h, int w, unsigned face )
     put( row + h - 1, col + w - 1, CH_UPPER, face, FELT );
 }
 
-/* face down: a board slot not dealt yet, or LAST CARD before the first read */
-static void card_back( int row, int col, int h, int w )
+/* face down; `edge` is blue, or brass when it is the cell to turn up next */
+static void card_back( int row, int col, int h, int w, unsigned edge )
 {
-    card_shape( row, col, h, w, GUI_BLUE );
+    card_shape( row, col, h, w, edge );
     fill( row + 1, col + 1, h - 2, w - 2, CH_SHADE, GUI_LBLUE, GUI_BLUE );
 }
 
-static unsigned ink_of( uint32_t r )        /* its printing colour on a white face */
+static unsigned ink_of( uint32_t r )        /* its printing colour on a card face */
 {
     if( RES_JOKER( r ) ) return GUI_MAGENTA;
     return SUIT_RED( RES_SUIT( r ) ) ? GUI_RED : GUI_BLACK;
@@ -225,52 +197,52 @@ static const char * rank_of( uint32_t r )
     return RES_JOKER( r ) ? "" : RANK_NAMES[ RES_RANK( r ) ];
 }
 
-/* LAST CARD, BIG_W x BIG_H: the index in two corners, then the pips where a
- * printed card has them -- or, for a court card or the joker, a framed
- * centrepiece. */
-static void draw_big( int row, int col, uint32_t r )
+/* A card face up, any of the three grid sizes: the rank in the corners and a
+ * pip in the middle; the 9x7 card adds the suit under each index, the 5x4 one
+ * has room only for "rank+suit" over a single pip. A nonzero `tag` is its pair
+ * number, bottom left, so the two cards of a pair can be told from the others. */
+static void card_face( int row, int col, int h, int w, uint32_t r, unsigned face, unsigned tag )
 {
-    unsigned ink = ink_of( r ), pip = pip_of( r ), k;
+    unsigned ink = ink_of( r ), pip = pip_of( r );
     const char * rank = rank_of( r );
-    unsigned long pips = RES_JOKER( r ) ? 0ul : PIPS[ RES_RANK( r ) ];
+    int len = ( int ) strlen( rank );
 
-    card_shape( row, col, BIG_H, BIG_W, GUI_WHITE );
-    text( row + 1, col + 1, 0, rank, ink, GUI_WHITE );
-    put( row + 2, col + 1, pip, ink, GUI_WHITE );
-    put( row + BIG_H - 3, col + BIG_W - 2, pip, ink, GUI_WHITE );
-    text( row + BIG_H - 2, col + BIG_W - 1 - ( int ) strlen( rank ), 0, rank, ink, GUI_WHITE );
-    if( pips ) {
-        for( k = 0; k < 21u; k++ )
-            if( pips & ( 1ul << k ) )
-                put( row + 1 + ( int ) ( k / 3u ), col + 4 + 2 * ( int ) ( k % 3u ), pip, ink, GUI_WHITE );
-        return;
+    card_shape( row, col, h, w, face );
+    if( tag ) {
+        char t[ 4 ];
+
+        snprintf( t, sizeof t, h < 5 ? "%u" : "#%u", tag );
+        text( row + ( h < 5 ? 2 : h - 2 ), col + ( h < 5 ? 0 : 1 ), 0, t, GUI_BLUE, face );
     }
-    frame( row + 2, col + 3, 5, 7, ink, GUI_WHITE );
-    put( row + 3, col + 6, pip, ink, GUI_WHITE );
-    if( RES_JOKER( r ) ) text( row + 4, col + 4, 0, "JOKER", ink, GUI_WHITE );
-    else                 text( row + 4, col + 6, 0, rank, ink, GUI_WHITE );
-    put( row + 5, col + 6, pip, ink, GUI_WHITE );
-}
-
-/* A board card, MINI_W x MINI_H: the rank in two corners, one pip in the middle. */
-static void draw_mini( int row, int col, uint32_t r )
-{
-    unsigned ink = ink_of( r );
-    const char * rank = rank_of( r );
-
-    card_shape( row, col, MINI_H, MINI_W, GUI_WHITE );
     if( RES_JOKER( r ) ) {
-        put( row + 1, col + 1, CH_SMILE, ink, GUI_WHITE );
-        text( row + 2, col + 1, 0, "JOKER", ink, GUI_WHITE );
-        put( row + 3, col + MINI_W - 2, CH_SMILE, ink, GUI_WHITE );
+        put( row + 1, col + 1, CH_SMILE, ink, face );
+        if( w >= 7 ) text( row + h / 2, col + ( w - 5 ) / 2, 0, "JOKER", ink, face );
+        else         text( row + h / 2, col + ( w - 3 ) / 2, 0, "JKR", ink, face );
         return;
     }
-    text( row + 1, col + 1, 0, rank, ink, GUI_WHITE );
-    put( row + 2, col + MINI_W / 2, pip_of( r ), ink, GUI_WHITE );
-    text( row + 3, col + MINI_W - 1 - ( int ) strlen( rank ), 0, rank, ink, GUI_WHITE );
+    text( row + 1, col + 1, 0, rank, ink, face );
+    if( h < 5 ) {
+        put( row + 1, col + 1 + len, pip, ink, face );
+        put( row + 2, col + w / 2, pip, ink, face );
+        return;
+    }
+    if( h >= 7 ) {
+        put( row + 2, col + 1, pip, ink, face );
+        put( row + h - 3, col + w - 2, pip, ink, face );
+    }
+    put( row + h / 2, col + w / 2, pip, ink, face );
+    text( row + h - 2, col + w - 1 - len, 0, rank, ink, face );
 }
 
-/* ---- panels ------------------------------------------------------------- */
+/* a cell with nothing read yet: an outline and its name, brass if it is next */
+static void card_slot( int row, int col, int h, int w, const char * name, unsigned fg )
+{
+    fill( row, col, h, w, ' ', fg, FELT );
+    frame( row, col, h, w, fg, FELT );
+    text( row + ( h - 1 ) / 2, col + ( w - 2 ) / 2, 0, name, fg, FELT );
+}
+
+/* ---- the grid ----------------------------------------------------------- */
 
 static const char * card_name( uint32_t r, char * buf, unsigned n )
 {
@@ -279,100 +251,133 @@ static const char * card_name( uint32_t r, char * buf, unsigned n )
     return buf;
 }
 
-static void draw_last( void )
+static const char * short_rank( uint32_t r )    /* "7", "10", "JK" */
 {
-    char buf[ 32 ], name[ 24 ];
-    const struct det * d = last_valid ? &last : NULL;
-    int row = LAST_ROW + 2;
-
-    if( !d ) {
-        card_back( LAST_ROW + 1, LAST_COL, BIG_H, BIG_W );
-        text( row, INFO_COL, INFO_W, "press KEY0", INK, FELT );
-        text( row + 1, INFO_COL, INFO_W, "to read a card", INK, FELT );
-        fill( row + 2, INFO_COL, 4, INFO_W, ' ', INK, FELT );
-        return;
-    }
-    draw_big( LAST_ROW + 1, LAST_COL, d->result );
-    text( row, INFO_COL, INFO_W, card_name( d->result, name, sizeof name ), INK, FELT );
-    snprintf( buf, sizeof buf, "logit %d", RES_SCORE( d->result ) );
-    text( row + 1, INFO_COL, INFO_W, buf, INK, FELT );
-    snprintf( buf, sizeof buf, "colour %s (%lu)", RES_COLOUR( d->result ) ? "red" : "black",
-              ( unsigned long ) d->red_count );
-    text( row + 2, INFO_COL, INFO_W, buf, INK, FELT );
-    snprintf( buf, sizeof buf, "infer %lu ms%s%s", ( unsigned long ) d->inf_ms,
-              d->where ? " " : "", d->where ? d->where : "" );
-    text( row + 3, INFO_COL, INFO_W, buf, INK, FELT );
-    snprintf( buf, sizeof buf, "shot #%u", d->shot );
-    text( row + 4, INFO_COL, INFO_W, buf, INK, FELT );
-    if( last_auto ) text( row + 5, INFO_COL, INFO_W, " auto: not tracked", GUI_BLACK, BRASS );
-    else            fill( row + 5, INFO_COL, 1, INFO_W, ' ', INK, FELT );
+    return RES_JOKER( r ) ? "JK" : RANK_NAMES[ RES_RANK( r ) ];
 }
 
-/* THE BOARD: the last BOARD_N tracked cards, oldest on the left */
+/* the top-left cell of card `i` on the current board */
+static void cell_pos( int i, int * row, int * col )
+{
+    int k = g.n - 3;
+    int gw = ( g.n - 1 ) * GEO[ k ].px + GEO[ k ].w, gh = ( g.n - 1 ) * GEO[ k ].py + GEO[ k ].h;
+
+    *col = AREA_COL + ( AREA_W - gw ) / 2 + ( i % g.n ) * GEO[ k ].px;
+    *row = AREA_ROW + 1 + ( AREA_H - 1 - gh ) / 2 + ( i / g.n ) * GEO[ k ].py;
+}
+
+static void draw_cell( int i )
+{
+    const struct grid_cell * c = &g.cell[ i ];
+    int k = g.n - 3, w = GEO[ k ].w, h = GEO[ k ].h, row, col;
+    char name[ 3 ];
+
+    cell_pos( i, &row, &col );
+    grid_cell_name( &g, i, name );
+    switch( c->state ) {
+    case CELL_EMPTY:   card_slot( row, col, h, w, name, i == g.target ? BRASS : GUI_LGREEN ); break;
+    case CELL_DOWN:    card_back( row, col, h, w, i == g.target ? BRASS : GUI_BLUE );         break;
+    case CELL_OPEN:    card_face( row, col, h, w, c->result, c->pair ? BRASS : GUI_WHITE, c->pair ); break;
+    case CELL_MATCHED: card_face( row, col, h, w, c->result, BRASS, 0 );                           break;
+    default: break;
+    }
+}
+
+/* the whole panel: after a new board, since the card size depends on N */
 static void draw_board( void )
 {
-    unsigned first = n_hist > BOARD_N ? n_hist - BOARD_N : 0u, i;
+    char buf[ 24 ];
+    int i, row, col;
 
-    fill( BOARD_ROW, BOARD_LINE, 1, COLS - 3 - BOARD_LINE, BX_H, BRASS, FELT );
-    for( i = 0; i < BOARD_N; i++ ) {
-        int col = BOARD_COL + BOARD_STEP * ( int ) i;
-
-        if( first + i < n_hist ) draw_mini( BOARD_ROW + 1, col, hist[ first + i ].result );
-        else                     card_back( BOARD_ROW + 1, col, MINI_H, MINI_W );
-        if( first + i + 1 == n_hist ) put( BOARD_ROW, col + MINI_W / 2, CH_DOWN, BRASS, FELT );
+    fill( GRID_ROW, GRID_COL, ROWS - 2, COLS - 1 - GRID_COL, ' ', INK, FELT );
+    put( 1, COLS - 2, CH_LOWER, FELT, WOOD );           /* the felt's rounded corners */
+    put( ROWS - 2, COLS - 2, CH_UPPER, FELT, WOOD );
+    snprintf( buf, sizeof buf, " %s %dx%d ", g.mode == GRID_SCAN ? "FACE-UP" : "FACE-DOWN GAME", g.n, g.n );
+    text( GRID_ROW, GRID_COL + 1, 0, buf, GUI_BLACK, BRASS );
+    for( i = 0; i < g.n; i++ ) {
+        cell_pos( i, &row, &col );                      /* top row: the column letters */
+        put( row - 1, col + GEO[ g.n - 3 ].w / 2, ( unsigned ) ( 'A' + i ), INK, FELT );
+        cell_pos( i * g.n, &row, &col );                /* left column: the row numbers */
+        put( row + ( GEO[ g.n - 3 ].h - 1 ) / 2, col - 2, ( unsigned ) ( '1' + i ), INK, FELT );
     }
+    for( i = 0; i < g.n * g.n; i++ ) draw_cell( i );
 }
 
-/* the deck grid, and the TABLE counts that come from the same tally */
-static void draw_deck( void )
+/* ---- INFO: the prompt and the round's progress -------------------------- */
+
+static void draw_info( void )
 {
-    static const unsigned char CHIP[ 4 ] = { GUI_WHITE, GUI_BLUE, GUI_BLACK, BRASS };
-    unsigned char cnt[ 4 ][ 13 ];
-    unsigned i, s, k, seen = 0, repeats = 0, jokers = 0;
-    char buf[ 24 ];
-    int row = STAT_ROW + 1;
+    char buf[ 48 ], a[ 3 ], b[ 3 ];
+    int  i, k, row = INFO_ROW + 2, cells = g.n * g.n;
 
-    memset( cnt, 0, sizeof cnt );
-    for( i = 0; i < n_hist; i++ ) {
-        uint32_t r = hist[ i ].result;
-        if( RES_JOKER( r ) ) jokers++;
-        else if( cnt[ RES_SUIT( r ) ][ RES_RANK( r ) ] < 255u ) cnt[ RES_SUIT( r ) ][ RES_RANK( r ) ]++;
+    /* the prompt: what the operator does next */
+    if( g.mode == GRID_SCAN ) {
+        grid_cell_name( &g, g.target < 0 ? 0 : g.target, a );
+        if( g.target >= 0 ) snprintf( buf, sizeof buf, " NEXT: %s - show it at the box, KEY0", a );
+        else                snprintf( buf, sizeof buf, " SCAN DONE - %u PAIR%s FOUND", g.pairs, g.pairs == 1 ? "" : "S" );
     }
-    for( s = 0; s < 4; s++ ) {
-        for( k = 0; k < 13; k++ ) {
-            int r = DECK_ROW + ( int ) s, c = DECK_COL + 4 + 4 * ( int ) k;
-            unsigned n = cnt[ s ][ k ];
+    else if( grid_left( &g ) <= 1 )
+        snprintf( buf, sizeof buf, " GAME OVER - A %u : B %u", g.score[ 0 ], g.score[ 1 ] );
+    else if( g.target >= 0 ) {
+        grid_cell_name( &g, g.target, a );
+        snprintf( buf, sizeof buf, " TEAM %c: turn up %s, show it, KEY0", 'A' + g.team, a );
+    }
+    else
+        snprintf( buf, sizeof buf, " TEAM %c: type the %s card's cell", 'A' + g.team,
+                  g.n_open == 1 ? "2nd" : "1st" );
+    text( INFO_ROW, INFO_COL, INFO_W, buf, GUI_BLACK, BRASS );
+    fill( INFO_ROW + 1, INFO_COL, 8, INFO_W, ' ', INK, FELT );
 
-            seen    += n != 0;
-            repeats += n > 1 ? n - 1 : 0;   /* one deck has one of each: likely misreads */
-            snprintf( buf, sizeof buf, "%2s ", RANK_NAMES[ k ] );
-            if( n ) text( r, c, 3, buf, SUIT_RED( s ) ? GUI_RED : GUI_BLACK, n > 1 ? BRASS : GUI_WHITE );
-            else    text( r, c, 3, buf, GUI_LGREEN, FELT );     /* printed on the felt */
+    if( g.mode == GRID_SCAN ) {
+        snprintf( buf, sizeof buf, "READ %u/%d    PAIRS %u", g.n_read, cells, g.pairs );
+        text( row++, INFO_COL, INFO_W, buf, INK, FELT );
+        /* the pairs, two columns of six: "3  7  A1+C3" */
+        for( k = 1; k <= g.pairs && k <= 12; k++ ) {
+            int first = -1;
+
+            for( i = 0; i < cells; i++ ) {
+                if( g.cell[ i ].pair != k ) continue;
+                if( first < 0 ) { first = i; continue; }
+                grid_cell_name( &g, first, a );
+                grid_cell_name( &g, i, b );
+                snprintf( buf, sizeof buf, "%2d %-2s %s+%s", k, short_rank( g.cell[ i ].result ), a, b );
+                text( row + ( k - 1 ) % 6, INFO_COL + ( k - 1 ) / 6 * 20, 19, buf, GUI_BLACK, BRASS );
+                break;
+            }
+        }
+    }
+    else {
+        snprintf( buf, sizeof buf, "TURN %u    TEAM %c TO PLAY", g.turn, 'A' + g.team );
+        text( row++, INFO_COL, INFO_W, buf, INK, FELT );
+        snprintf( buf, sizeof buf, "SCORE   A %u : B %u", g.score[ 0 ], g.score[ 1 ] );
+        text( row++, INFO_COL, INFO_W, buf, INK, FELT );
+        snprintf( buf, sizeof buf, "LEFT    %d of %d cards", grid_left( &g ), cells );
+        text( row++, INFO_COL, INFO_W, buf, INK, FELT );
+        if( g.outcome != OUT_NONE && g.n_open == 2 ) {
+            grid_cell_name( &g, g.open[ 0 ], a );
+            grid_cell_name( &g, g.open[ 1 ], b );
+            snprintf( buf, sizeof buf, " %s  %s+%s  (team %c)", g.outcome == OUT_MATCH ? "MATCH" : "NO MATCH",
+                      a, b, 'A' + ( g.team ^ 1 ) );
+            text( ++row, INFO_COL, 0, buf, GUI_BLACK, g.outcome == OUT_MATCH ? BRASS : GUI_WHITE );
         }
     }
 
-    snprintf( buf, sizeof buf, "SEEN    %2u/52", seen );
-    text( row, STAT_COL, 16, buf, INK, FELT );
-    for( k = 0; k < 13; k++ )               /* a chip for every 4 cards seen */
-        put( row, STAT_COL + 16 + ( int ) k, 4 * k < seen ? CH_CHIP : ' ', CHIP[ k % 4 ], FELT );
-    snprintf( buf, sizeof buf, "UNSEEN  %2u", 52 - seen );
-    text( ++row, STAT_COL, 16, buf, INK, FELT );
-    snprintf( buf, sizeof buf, "REPEATS %2u", repeats );
-    text( ++row, STAT_COL, 16, buf, INK, FELT );
-    snprintf( buf, sizeof buf, "JOKERS  %2u", jokers );
-    text( ++row, STAT_COL, 16, buf, INK, FELT );
-    snprintf( buf, sizeof buf, "READS   %2u", n_hist );
-    text( ++row, STAT_COL, 16, buf, INK, FELT );
+    /* the latest read, wherever it went; blank after a new board or an undo */
+    buf[ 0 ] = '\0';
+    if( last_valid ) {
+        char name[ 24 ];
+
+        if( last.placed >= 0 ) grid_cell_name( &g, last.placed, a );
+        snprintf( buf, sizeof buf, "last: %s %s %s", card_name( last.result, name, sizeof name ),
+                  last.placed >= 0 ? "->" : "", last.placed >= 0 ? a : "(not placed)" );
+    }
+    text( ROWS - 2, INFO_COL, INFO_W, buf, INK, FELT );
 }
 
-static void show_newest( void )
+static void redraw( void )
 {
-    last_valid = n_hist > 0;
-    last_auto  = 0;
-    if( last_valid ) last = hist[ n_hist - 1 ];
-    draw_last();
     draw_board();
-    draw_deck();
+    draw_info();
 }
 
 /* ---- API ---------------------------------------------------------------- */
@@ -389,15 +394,27 @@ void gui_status( const char * msg, enum gui_colour colour )
     put( 0, c + 1 + n, ' ', GUI_BLACK, colour );
 }
 
+static void new_board( int n, int mode )
+{
+    char msg[ 24 ];
+
+    grid_new( &g, n, mode );
+    n_undo = 0;
+    last_valid = 0;
+    redraw();
+    snprintf( msg, sizeof msg, "NEW %dx%d %s", g.n, g.n, mode == GRID_SCAN ? "SCAN" : "GAME" );
+    gui_status( msg, GUI_LGREEN );
+}
+
 void gui_init( void )
 {
     static const struct { const char * key, * what; } HELP[] = {
-        { "KEY0", "capture" }, { "KEY1", "undo (hold: clear)" }, { "SW0", "ascii" }, { "SW1", "pgm" },
+        { "KEY0", "read" }, { "KEY1", "undo/hold:new" }, { "SW0", "ascii" }, { "SW1", "pgm" },
 #if RTOS_MODE
-        { "SW2", "stats" }, { "SW3", "auto" },
+        { "SW2", "stats" }, { "SW3", "auto" }, { "UART", "h" },
 #endif
     };
-    unsigned k, s;
+    unsigned k;
     int r, col;
 
     fill( 0, 0, ROWS, COLS, ' ', INK, FELT );
@@ -409,10 +426,8 @@ void gui_init( void )
         put( r, 0, ' ', INK, WOOD );
         put( r, COLS - 1, ' ', INK, WOOD );
     }
-    put( 1, COLS - 2, CH_LOWER, FELT, WOOD );
     put( HINT_ROW, 1, CH_LOWER, FELT, WOOD );           /* under the camera */
     put( ROWS - 2, 1, CH_UPPER, FELT, WOOD );
-    put( ROWS - 2, COLS - 2, CH_UPPER, FELT, WOOD );
 
     col = text( 0, 2, 0, "\x06\x03 ECE4813  CARD TABLE \x05\x04", BRASS, WOOD );
     text( 0, col + 2, 0, "DE10-Nano CNN", INK, WOOD );
@@ -420,16 +435,7 @@ void gui_init( void )
     /* the camera, set into the rail: wood with a brass pinstripe round the preview */
     frame( CAM_ROW, CAM_COL, CAM_H, CAM_W, BRASS, WOOD );
     text( CAM_ROW, CAM_COL + 3, 0, " LIVE CAMERA ", GUI_BLACK, BRASS );
-    text( HINT_ROW, 2, CAM_W - 3, "card corner just inside the green box", INK, FELT );
-
-    text( LAST_ROW, LAST_COL, 0, " LAST CARD ", GUI_BLACK, BRASS );
-    text( STAT_ROW, STAT_COL, 0, " TABLE ", GUI_BLACK, BRASS );
-    text( BOARD_ROW, 3, 0, " THE BOARD ", GUI_BLACK, BRASS );
-    for( s = 0; s < 4; s++ ) {
-        put( DECK_ROW + ( int ) s, DECK_COL, ' ', GUI_BLACK, GUI_WHITE );
-        put( DECK_ROW + ( int ) s, DECK_COL + 1, SUIT_CH[ s ], SUIT_RED( s ) ? GUI_RED : GUI_BLACK, GUI_WHITE );
-        put( DECK_ROW + ( int ) s, DECK_COL + 2, ' ', GUI_BLACK, GUI_WHITE );
-    }
+    text( HINT_ROW, 2, CAM_W - 3, "fit the whole card in the green box", INK, FELT );
 
     col = 1;
     for( k = 0; k < sizeof HELP / sizeof HELP[ 0 ]; k++ ) {
@@ -437,14 +443,15 @@ void gui_init( void )
         col = text( ROWS - 1, col, 0, HELP[ k ].what, INK, WOOD ) + 2;
     }
 
-    n_hist = 0;
-    show_newest();
+    new_board( 3, GRID_SCAN );                          /* round 1: face-up 3x3 */
     gui_status( "READY", GUI_LGREEN );
 }
 
 void gui_job_done( unsigned shot, const struct vision_result * v, int track, const char * where )
 {
-    struct det d;
+    struct grid before;
+    char msg[ 28 ], cell[ 3 ], name[ 24 ];
+    int ev;
 
     switch( v->status ) {
     case VIS_NO_TRIGGER:    gui_status( "CAMERA STOPPED", GUI_LRED );  return;
@@ -457,45 +464,93 @@ void gui_job_done( unsigned shot, const struct vision_result * v, int track, con
     if( !RES_JOKER( v->result ) && RES_RANK( v->result ) >= 13u ) { gui_status( "BAD RESULT", GUI_LRED ); return; }
     if( v->maxv == 0u )                                       { gui_status( "BLANK FRAME", GUI_YELLOW ); return; }
 
-    d.result    = v->result;
-    d.red_count = v->red_count;
-    d.inf_ms    = v->inf_us / 1000u;
-    d.shot      = shot;
-    d.where     = where;
-
-    last       = d;
-    last_valid = 1;
-    last_auto  = !track;
-    if( track ) {
-        if( n_hist == HIST_MAX ) {
-            memmove( hist, hist + 1, ( HIST_MAX - 1 ) * sizeof hist[ 0 ] );
-            n_hist--;
-        }
-        hist[ n_hist++ ] = d;
-        draw_board();
-        draw_deck();
+    last.result = v->result;
+    last.shot   = shot;
+    last.where  = where;
+    last.placed = -1;
+    last_valid  = 1;
+    if( !track ) {                          /* SW3 auto: shown, never placed */
+        draw_info();
+        gui_status( "READY (auto)", GUI_LGREEN );
+        return;
     }
-    draw_last();
-    gui_status( track ? "READY" : "READY (auto)", GUI_LGREEN );
+
+    before = g;
+    ev = grid_read( &g, v->result, shot );
+    if( ev == GRID_NO_CELL || ev == GRID_BAD_CELL ) {
+        draw_info();
+        gui_status( ev == GRID_BAD_CELL ? "CELL NOT FACE DOWN" :
+                    g.mode == GRID_SCAN ? "GRID FULL - type a cell" : "TYPE THE CELL FIRST", GUI_YELLOW );
+        return;
+    }
+    undo_ring[ undo_head ] = before;
+    undo_head = ( undo_head + 1 ) % UNDO_MAX;
+    if( n_undo < UNDO_MAX ) n_undo++;
+    last.placed = g.last;
+
+    redraw();
+    grid_cell_name( &g, g.last, cell );
+    if( ev == GRID_JUDGED ) gui_status( g.outcome == OUT_MATCH ? "MATCH!" : "NO MATCH", g.outcome == OUT_MATCH ? GUI_LGREEN : GUI_YELLOW );
+    else if( ev == GRID_PAIRED ) {
+        snprintf( msg, sizeof msg, "PAIR: %s + %s", short_rank( v->result ), cell );
+        gui_status( msg, GUI_LGREEN );
+    }
+    else {
+        snprintf( msg, sizeof msg, "%s: %s", cell, card_name( v->result, name, sizeof name ) );
+        gui_status( msg, GUI_LGREEN );
+    }
 }
 
 void gui_undo( void )
 {
-    char msg[ 24 ];
+    char msg[ 24 ], cell[ 3 ];
 
-    if( !n_hist ) {
+    if( !n_undo ) {
         gui_status( "NOTHING TO UNDO", GUI_YELLOW );
         return;
     }
-    n_hist--;
-    snprintf( msg, sizeof msg, "UNDID #%u", hist[ n_hist ].shot );
-    show_newest();
+    grid_cell_name( &g, g.last, cell );
+    undo_head = ( undo_head + UNDO_MAX - 1 ) % UNDO_MAX;
+    g = undo_ring[ undo_head ];
+    n_undo--;
+    last_valid = 0;
+    redraw();
+    snprintf( msg, sizeof msg, "UNDID %s", cell );
     gui_status( msg, GUI_YELLOW );
 }
 
 void gui_clear( void )
 {
-    n_hist = 0;
-    show_newest();
-    gui_status( "TRACKER CLEARED", GUI_YELLOW );
+    new_board( g.n, g.mode );
+}
+
+int gui_command( const char * cmd )
+{
+    char c0 = cmd[ 0 ] | 0x20, msg[ 24 ], name[ 3 ];
+    int  cell;
+
+    if( cmd[ 0 ] >= '3' && cmd[ 0 ] <= '5' && !cmd[ 1 ] ) {         /* "4": face-up scan */
+        new_board( cmd[ 0 ] - '0', GRID_SCAN );
+        return 1;
+    }
+    if( c0 == 'g' && cmd[ 1 ] >= '3' && cmd[ 1 ] <= '5' && !cmd[ 2 ] ) {   /* "g4": face-down game */
+        new_board( cmd[ 1 ] - '0', GRID_GAME );
+        return 1;
+    }
+    if( c0 == 'r' && !cmd[ 1 ] ) {                                  /* restart this board */
+        new_board( g.n, g.mode );
+        return 1;
+    }
+    cell = grid_parse_cell( &g, cmd );
+    if( cell < 0 ) return 0;
+    grid_cell_name( &g, cell, name );
+    if( !grid_target( &g, cell ) ) {
+        snprintf( msg, sizeof msg, "%s IS NOT FACE DOWN", name );
+        gui_status( msg, GUI_YELLOW );
+        return 1;
+    }
+    redraw();
+    snprintf( msg, sizeof msg, "NEXT: %s", name );
+    gui_status( msg, GUI_LGREEN );
+    return 1;
 }

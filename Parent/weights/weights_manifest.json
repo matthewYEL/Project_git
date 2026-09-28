@@ -34,7 +34,7 @@
     "path": "../../LAB_5/fpga_cnn/workspace_lab3/M2/fcs_w_ddr.h",
     "md5": "619f390497084b951d4a785652238aca"
   },
-  "written": "2026-09-27 21:40:10",
+  "written": "2026-09-27 21:40:09",
   "files": {
     "conv1_w.hex": {
       "count": 200,

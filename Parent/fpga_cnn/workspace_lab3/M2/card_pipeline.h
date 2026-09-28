@@ -145,8 +145,10 @@ unsigned keys_held( void );
 unsigned read_switches( void );
 
 /* Console on HPS UART0, 115200 8N1 (uart_console.c; SEMIHOSTED=0 builds).
- * Call once, first thing in main(). */
+ * Call once, first thing in main(). uart_getc() returns one received character
+ * or -1 without waiting (always -1 in a semihosted build). */
 void uart_console_init( void );
+int  uart_getc( void );
 
 /* "2".."10","J","Q","K","A" by rank index; "Spades","Clubs","Hearts","Diamonds"
  * by suit index (atlas_main.c) -- shared by the console and the HDMI dashboard. */

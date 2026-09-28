@@ -26,14 +26,18 @@ void gui_init( void );
 /* The title bar's status field, e.g. ("READY", GUI_LGREEN). */
 void gui_status( const char * msg, enum gui_colour colour );
 
-/* A finished job. A real card goes to LAST CARD and, when `track` is set, onto
- * the board (the last 5) and into the deck grid; camera/CNN/DDR3 failures and
- * blank frames only set the status. `where` ("CPU1"/"CPU0" or NULL) is shown
- * with the card. */
+/* A finished job. When `track` is set a real card goes into the grid's target
+ * cell (grid.c); an untracked one (SW3 auto) is only shown. Camera/CNN/DDR3
+ * failures and blank frames only set the status. */
 void gui_job_done( unsigned shot, const struct vision_result * v, int track, const char * where );
 
-/* Drop the newest tracked card (KEY1 tap) / all of them (KEY1 held). */
+/* KEY1: undo the last read (tap) / start the same board again (held). */
 void gui_undo( void );
 void gui_clear( void );
+
+/* An operator command line (UART): "3".."5" a new face-up scan of that size,
+ * "g3".."g5" a new face-down game, "r" the same board again, "a1".."e5" the
+ * cell the next read goes to. 0 if it is none of these. */
+int gui_command( const char * cmd );
 
 #endif /* HDMI_GUI_H */
