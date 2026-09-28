@@ -153,4 +153,25 @@ create_clock -period "1 MHz" [get_ports hps_i2c0_SCL]
 create_clock -period "1 MHz" [get_ports hps_i2c1_SCL]
 create_clock -period "48 MHz" [get_ports hps_usb1_CLK]
 
+# ---- camera + HDMI clocks (the pattern of Terasic's DE10_Nano_D8M_DDR3.sdc) ----
+# Without derive_pll_clocks the VIDEO_PLL outputs (VGA_CLK 25 MHz, MIPI_REFCLK
+# 20 MHz) were timed as a 50 MHz copy of FPGA_CLK2_50, and the clk50 <-> VGA
+# crossings as if they were synchronous; MIPI_PIXEL_CLK had no clock at all,
+# so capture_384 was never timing-checked.
+# 25 MHz is Terasic's figure for the D8M pixel clock: replace it with what
+# atlas_main.c check_camera_alive() measures on the board.
+create_clock -period "25.0 MHz" -name MIPI_PIXEL_CLK [get_ports MIPI_PIXEL_CLK]
+derive_pll_clocks
+derive_clock_uncertainty
+set_input_delay -clock MIPI_PIXEL_CLK 2.0 [get_ports {MIPI_PIXEL_D[*] MIPI_PIXEL_HS MIPI_PIXEL_VS}]
+# Genuinely asynchronous domains: the camera's pixel clock, and the video PLL
+# (u_camera|pll2, fed by FPGA_CLK2_50) against clk50 and the HPS. Everything
+# that crosses between them goes through a dual-clock RAM, a synchroniser or a
+# value held static while it is read (capture_384's red_count after snapshot_done).
+set_clock_groups -asynchronous -group [get_clocks {MIPI_PIXEL_CLK}]
+set_clock_groups -asynchronous -group [get_clocks {FPGA_CLK2_50 *pll2*}]
+# Deliberately left unconstrained: VGA_Controller's oVGA_HS (clocks V_Cont,
+# which only changes in blanking), and the 1 Hz / I2C divided clocks of the
+# camera and HDMI configuration sequencers -- slow control logic.
+
 

@@ -10,6 +10,15 @@ module soc_system (
 		input  wire [31:0] cnn_result_pio_external_connection_export,             //             cnn_result_pio_external_connection.export
 		output wire        cnn_start_pio_external_connection_export,              //              cnn_start_pio_external_connection.export
 		input  wire [3:0]  dipsw_pio_external_connection_export,                  //                  dipsw_pio_external_connection.export
+		input  wire [29:0] f2h_sdram0_data_address,                               //                                f2h_sdram0_data.address
+		input  wire [7:0]  f2h_sdram0_data_burstcount,                            //                                               .burstcount
+		output wire        f2h_sdram0_data_waitrequest,                           //                                               .waitrequest
+		output wire [31:0] f2h_sdram0_data_readdata,                              //                                               .readdata
+		output wire        f2h_sdram0_data_readdatavalid,                         //                                               .readdatavalid
+		input  wire        f2h_sdram0_data_read,                                  //                                               .read
+		input  wire [31:0] f2h_sdram0_data_writedata,                             //                                               .writedata
+		input  wire [3:0]  f2h_sdram0_data_byteenable,                            //                                               .byteenable
+		input  wire        f2h_sdram0_data_write,                                 //                                               .write
 		output wire        h2f_reset_reset_n,                                     //                                      h2f_reset.reset_n
 		output wire        hps_io_hps_io_emac1_inst_TX_CLK,                       //                                         hps_io.hps_io_emac1_inst_TX_CLK
 		output wire        hps_io_hps_io_emac1_inst_TXD0,                         //                                               .hps_io_emac1_inst_TXD0
@@ -59,7 +68,7 @@ module soc_system (
 		inout  wire        hps_io_hps_io_gpio_inst_GPIO53,                        //                                               .hps_io_gpio_inst_GPIO53
 		inout  wire        hps_io_hps_io_gpio_inst_GPIO54,                        //                                               .hps_io_gpio_inst_GPIO54
 		inout  wire        hps_io_hps_io_gpio_inst_GPIO61,                        //                                               .hps_io_gpio_inst_GPIO61
-		output wire [11:0] img_wr_addr_pio_external_connection_export,            //            img_wr_addr_pio_external_connection.export
+		output wire [13:0] img_wr_addr_pio_external_connection_export,            //            img_wr_addr_pio_external_connection.export
 		output wire [3:0]  img_wr_ctrl_pio_external_connection_export,            //            img_wr_ctrl_pio_external_connection.export
 		output wire [15:0] img_wr_data_pio_external_connection_export,            //            img_wr_data_pio_external_connection.export
 		input  wire [7:0]  led_pio_external_connection_in_port,                   //                    led_pio_external_connection.in_port
@@ -81,7 +90,7 @@ module soc_system (
 		output wire [3:0]  memory_mem_dm,                                         //                                               .mem_dm
 		input  wire        memory_oct_rzqin,                                      //                                               .oct_rzqin
 		input  wire        reset_reset_n,                                         //                                          reset.reset_n
-		output wire [11:0] snapshot_addr_pio_external_connection_export,          //          snapshot_addr_pio_external_connection.export
+		output wire [17:0] snapshot_addr_pio_external_connection_export,          //          snapshot_addr_pio_external_connection.export
 		input  wire [15:0] snapshot_data_pio_external_connection_export           //          snapshot_data_pio_external_connection.export
 	);
 
@@ -337,6 +346,16 @@ module soc_system (
 		.hps_io_gpio_inst_GPIO54  (hps_io_hps_io_gpio_inst_GPIO54),  //                  .hps_io_gpio_inst_GPIO54
 		.hps_io_gpio_inst_GPIO61  (hps_io_hps_io_gpio_inst_GPIO61),  //                  .hps_io_gpio_inst_GPIO61
 		.h2f_rst_n                (h2f_reset_reset_n),               //         h2f_reset.reset_n
+		.f2h_sdram0_clk           (clk_clk),                         //  f2h_sdram0_clock.clk
+		.f2h_sdram0_ADDRESS       (f2h_sdram0_data_address),         //   f2h_sdram0_data.address
+		.f2h_sdram0_BURSTCOUNT    (f2h_sdram0_data_burstcount),      //                  .burstcount
+		.f2h_sdram0_WAITREQUEST   (f2h_sdram0_data_waitrequest),     //                  .waitrequest
+		.f2h_sdram0_READDATA      (f2h_sdram0_data_readdata),        //                  .readdata
+		.f2h_sdram0_READDATAVALID (f2h_sdram0_data_readdatavalid),   //                  .readdatavalid
+		.f2h_sdram0_READ          (f2h_sdram0_data_read),            //                  .read
+		.f2h_sdram0_WRITEDATA     (f2h_sdram0_data_writedata),       //                  .writedata
+		.f2h_sdram0_BYTEENABLE    (f2h_sdram0_data_byteenable),      //                  .byteenable
+		.f2h_sdram0_WRITE         (f2h_sdram0_data_write),           //                  .write
 		.h2f_axi_clk              (clk_clk),                         //     h2f_axi_clock.clk
 		.h2f_AWID                 (hps_0_h2f_axi_master_awid),       //    h2f_axi_master.awid
 		.h2f_AWADDR               (hps_0_h2f_axi_master_awaddr),     //                  .awaddr
@@ -471,7 +490,7 @@ module soc_system (
 		.freeze     (1'b0)                                              // (terminated)
 	);
 
-	soc_system_img_wr_addr_pio snapshot_addr_pio (
+	soc_system_snapshot_addr_pio snapshot_addr_pio (
 		.clk        (clk_clk),                                           //                 clk.clk
 		.reset_n    (~rst_controller_reset_out_reset),                   //               reset.reset_n
 		.address    (mm_interconnect_1_snapshot_addr_pio_s1_address),    //                  s1.address

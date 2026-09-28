@@ -6,51 +6,51 @@
     <stringAttribute key="ANDROID_APP_DIR" value=""/>
     <stringAttribute key="ANDROID_PROCESS_NAME" value=""/>
     <mapAttribute key="AverageDurationTracker">
-        <mapEntry key="*Fetching Data Model" value="1391624"/>
-        <mapEntry key="*list global low level symbols" value="1745009"/>
+        <mapEntry key="*Fetching Data Model" value="2461705"/>
+        <mapEntry key="*list global low level symbols" value="1991230"/>
         <mapEntry key="*loading values from target" value="9941298"/>
         <mapEntry key="*updating registers" value="109042500"/>
         <mapEntry key="*updating variables" value="11234444"/>
-        <mapEntry key="AddEventObserver" value="2097473"/>
+        <mapEntry key="AddEventObserver" value="3573461"/>
         <mapEntry key="Evaluate" value="598469"/>
         <mapEntry key="Retrieving globals list" value="58890000"/>
         <mapEntry key="areCachesAvailable" value="216822"/>
         <mapEntry key="break" value="12984140"/>
         <mapEntry key="checking tracepoints" value="15392"/>
-        <mapEntry key="compute execution mode" value="392639"/>
-        <mapEntry key="continue" value="12325331"/>
+        <mapEntry key="compute execution mode" value="1282448"/>
+        <mapEntry key="continue" value="13105537"/>
         <mapEntry key="core" value="7833300"/>
         <mapEntry key="disassemble" value="43847548"/>
         <mapEntry key="evaluate address" value="592998"/>
         <mapEntry key="finish" value="41648650"/>
-        <mapEntry key="get capabilities" value="132445"/>
-        <mapEntry key="get execution addresss" value="429991"/>
-        <mapEntry key="get source lines" value="1127960"/>
+        <mapEntry key="get capabilities" value="217721"/>
+        <mapEntry key="get execution addresss" value="548862"/>
+        <mapEntry key="get source lines" value="826384"/>
         <mapEntry key="getValidEncodings" value="201972"/>
-        <mapEntry key="initialize command help" value="51364857"/>
+        <mapEntry key="initialize command help" value="87262212"/>
         <mapEntry key="interrupt" value="3243078"/>
-        <mapEntry key="list breakpoint options" value="634869"/>
-        <mapEntry key="list breakpoints" value="701245"/>
-        <mapEntry key="list instruction sets" value="844014"/>
-        <mapEntry key="list signals" value="672391"/>
-        <mapEntry key="list watchpoint options" value="1201418"/>
-        <mapEntry key="list watchpoints" value="390301"/>
-        <mapEntry key="loadfile" value="855229943"/>
+        <mapEntry key="list breakpoint options" value="874685"/>
+        <mapEntry key="list breakpoints" value="948034"/>
+        <mapEntry key="list instruction sets" value="1549594"/>
+        <mapEntry key="list signals" value="1983810"/>
+        <mapEntry key="list watchpoint options" value="1731183"/>
+        <mapEntry key="list watchpoints" value="675901"/>
+        <mapEntry key="loadfile" value="3443492098"/>
         <mapEntry key="next" value="36279262"/>
         <mapEntry key="nexti" value="40434637"/>
-        <mapEntry key="reload-symbol-file" value="677824899"/>
+        <mapEntry key="reload-symbol-file" value="452778449"/>
         <mapEntry key="remove" value="8293506"/>
-        <mapEntry key="set CWD" value="3439481"/>
+        <mapEntry key="set CWD" value="7264790"/>
         <mapEntry key="set breakpoint properties" value="23404184"/>
-        <mapEntry key="set debug-from" value="623818"/>
-        <mapEntry key="source altera_target_check.py" value="621685971"/>
-        <mapEntry key="source debug-hosted.ds" value="6482793905"/>
-        <mapEntry key="start" value="46747963"/>
+        <mapEntry key="set debug-from" value="958835"/>
+        <mapEntry key="source altera_target_check.py" value="799155430"/>
+        <mapEntry key="source debug-hosted.ds" value="7282268120"/>
+        <mapEntry key="start" value="55692923"/>
         <mapEntry key="step" value="28515251"/>
         <mapEntry key="stepi" value="24624784"/>
         <mapEntry key="target reset" value="1169066100"/>
         <mapEntry key="toggleBreakpoint" value="16561178"/>
-        <mapEntry key="waitForTargetToStop" value="276002403"/>
+        <mapEntry key="waitForTargetToStop" value="490981932"/>
         <mapEntry key="グローバルリストの取得" value="96269180"/>
     </mapAttribute>
     <stringAttribute key="CLOCK_SPEED" value="20kHz"/>
@@ -68,9 +68,9 @@
     <stringAttribute key="FILES.DEBUG_RESIDENT_ANDROID.RESOURCES.0.VALUE" value=""/>
     <intAttribute key="FILES.DEBUG_RESIDENT_ANDROID.RESOURCES.COUNT" value="1"/>
     <listAttribute key="FILES.DEBUG_RESIDENT_APP"/>
-    <stringAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.0.TYPE" value="TARGET_WORKING_DIR"/>
+    <stringAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.0.TYPE" value="APPLICATION_ON_TARGET"/>
     <stringAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.0.VALUE" value=""/>
-    <stringAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.1.TYPE" value="APPLICATION_ON_TARGET"/>
+    <stringAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.1.TYPE" value="TARGET_WORKING_DIR"/>
     <stringAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.1.VALUE" value=""/>
     <intAttribute key="FILES.DEBUG_RESIDENT_APP.RESOURCES.COUNT" value="2"/>
     <listAttribute key="FILES.DOWNLOAD_AND_DEBUG"/>

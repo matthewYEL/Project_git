@@ -1,0 +1,104 @@
+{
+  "checkpoint": "checkpoints_16\\best_dualhead_model.pt",
+  "checkpoint_sha256": "1c92db0fcabde05ca1cf76fd6169e79e6fb1382b6d06c04934f8735cac3bcb0f",
+  "frac_bits": 10,
+  "fit_range": 16.0,
+  "layer_scales": {
+    "conv1": 1.0,
+    "conv2": 0.6381216909060025,
+    "conv3": 0.17759995921509725,
+    "conv4": 0.12214729278430328,
+    "fc_shared": 0.08958878609115505,
+    "fc_rank": 0.10294339838995824,
+    "fc_suit": 0.2417930079037639,
+    "fc_joker": 0.0988627506403928
+  },
+  "fcs_w_frac": 14,
+  "peak_activations_after_fit": {
+    "conv1": 6.654148101806641,
+    "conv2": 15.99999713897705,
+    "conv3": 15.999995231628418,
+    "conv4": 15.999988555908203,
+    "fc_shared": 15.99999713897705,
+    "fc_rank": 16.000003814697266,
+    "fc_suit": 16.000001907348633,
+    "fc_joker": 16.0
+  },
+  "conv1_ch": 8,
+  "img_dw": 10,
+  "narrow_rom_bits": {
+    "conv3_w": 10,
+    "conv4_w": 10
+  },
+  "hps_header": {
+    "path": "../../LAB_5/fpga_cnn/workspace_lab3/M2/fcs_w_ddr.h",
+    "md5": "619f390497084b951d4a785652238aca"
+  },
+  "written": "2026-09-27 21:40:09",
+  "files": {
+    "conv1_w.hex": {
+      "count": 200,
+      "md5": "32babc699615b9c6e1b170df6ce5fe08"
+    },
+    "conv1_b.hex": {
+      "count": 8,
+      "md5": "f3c0447e1ad6afa56710db59c521f4bc"
+    },
+    "conv2_w.hex": {
+      "count": 3200,
+      "md5": "427b1e76639fc6dbee8001841594c1b1"
+    },
+    "conv2_b.hex": {
+      "count": 16,
+      "md5": "0a30a0264a10a4e93e6c6914208e85ee"
+    },
+    "conv3_w.hex": {
+      "count": 6400,
+      "md5": "d4fd755e84cd2a3e02c02f01b5a7ed24"
+    },
+    "conv3_b.hex": {
+      "count": 16,
+      "md5": "f87895228d56acc7379d49f2e519a955"
+    },
+    "conv4_w.hex": {
+      "count": 6400,
+      "md5": "a2eef429dd0bf2f02e524b515a42e4e4"
+    },
+    "conv4_b.hex": {
+      "count": 16,
+      "md5": "fa6bdb72e1cd529452a19876203848c9"
+    },
+    "fcs_w.hex": {
+      "count": 147520,
+      "md5": "f46e5aab706425a81144f87fed1de0d2"
+    },
+    "fcs_b.hex": {
+      "count": 64,
+      "md5": "cb8487fdfdb1eaf6e67ed538a995b9ac"
+    },
+    "fcrank_w.hex": {
+      "count": 832,
+      "md5": "6cf1bac73a855dd6833cdbb21192ff01"
+    },
+    "fcrank_b.hex": {
+      "count": 13,
+      "md5": "9e339130b0cda17dc62af639d205c6cb"
+    },
+    "fcsuit_w.hex": {
+      "count": 256,
+      "md5": "8f9b23d5cb5b7806892751bfe8ec4de3"
+    },
+    "fcsuit_b.hex": {
+      "count": 4,
+      "md5": "35d8e89306bcd1563bf4c9169499fa0e"
+    },
+    "fcjoker_w.hex": {
+      "count": 128,
+      "md5": "2a69d00e7e38f019664498c402014570"
+    },
+    "fcjoker_b.hex": {
+      "count": 2,
+      "md5": "61a02bd0ec642b0c4c73587c3cc4e3ae"
+    }
+  }
+}

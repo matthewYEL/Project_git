@@ -136,3 +136,30 @@ module ram_dp #(
         rd_data <= mem[rd_addr];
     end
 endmodule
+
+
+// ---------------------------------------------------------------------------
+// ram_dp_dc.v  --  simple dual-port RAM, independent write/read clocks.
+// Same shape as ram_dp above (so Quartus infers M10K, not logic), but the
+// write and read ports run on different clocks -- for card_cnn_core.v's image
+// RAM, written by the camera capture path on its pixel clock and read by the
+// CNN on fpga_clk_50. This is the same crossing ON_CHIP_FRAM.v's FRAM_BUFF
+// already relies on; a plain single-clock ram_dp is not safe between domains.
+// ---------------------------------------------------------------------------
+module ram_dp_dc #(
+    parameter AW    = 18,
+    parameter DW    = 16,
+    parameter DEPTH = (1<<AW)
+)(
+    input  wire             wr_clk,
+    input  wire             wr_en,
+    input  wire [AW-1:0]    wr_addr,
+    input  wire [DW-1:0]    wr_data,
+    input  wire             rd_clk,
+    input  wire [AW-1:0]    rd_addr,
+    output reg  [DW-1:0]    rd_data
+);
+    reg [DW-1:0] mem [0:DEPTH-1];
+    always @(posedge wr_clk) if (wr_en) mem[wr_addr] <= wr_data;
+    always @(posedge rd_clk) rd_data <= mem[rd_addr];
+endmodule

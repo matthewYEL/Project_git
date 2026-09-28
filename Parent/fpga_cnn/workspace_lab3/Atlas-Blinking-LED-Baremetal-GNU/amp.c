@@ -1,3 +1,6 @@
+/* Compiled only in the FreeRTOS build (RTOS_MODE in app_config.h). */
+#include "app_config.h"
+#if RTOS_MODE
 /*
  * Releasing and driving the second Cortex-A9. See amp.h for the shape of it.
  *
@@ -80,15 +83,16 @@ void ampCacheInvalidate( const void * pvAddr, uint32_t ulBytes )
 
 /* ---- CPU1 side ---------------------------------------------------------- */
 
-/* The worker. No RTOS, no interrupts, no FPGA access -- it only ever touches
- * the shared block, so there is nothing for it to race with CPU0 over beyond
- * the req/done handshake. */
+/* The worker. No RTOS, no interrupts, no printf. While a job is in flight it
+ * owns the camera/CNN PIOs; CPU0 touches them only between jobs (app_rtos.c's
+ * Vision task holds the next job until the Report task is done with this one).
+ * The only other thing it shares with CPU0 is the req/done handshake. */
 static void ampCore1Main( void )
 {
     struct amp_shared * pxShared = AMP;
-    int i;
+    struct amp_job    * pxJob    = &pxShared->job;
 
-    pxShared->core1_frames  = 0;
+    pxShared->core1_jobs    = 0;
     pxShared->core1_busy_us = 0;
     dmb();
     pxShared->core1_alive = AMP_MAGIC;
@@ -96,38 +100,41 @@ static void ampCore1Main( void )
 
     while( pxShared->stop == 0UL )
     {
-        for( i = 0; i < AMP_SLOTS; i++ )
+        uint32_t ulReq;
+        uint32_t ulStart;
+        uint32_t ulUs;
+
+        ampCacheInvalidate( ( const void * ) pxJob, AMP_JOB_HEAD_BYTES );
+        ulReq = pxJob->req;
+
+        if( ulReq == pxJob->done )
         {
-            struct amp_slot * pxSlot = &pxShared->slot[ i ];
-            uint32_t ulReq = pxSlot->req;
-
-            if( ulReq != pxSlot->done )
-            {
-                uint32_t ulStart = ulGlobalTimerNow();
-
-                ampCacheInvalidate( pxSlot->raw, sizeof( pxSlot->raw ) );
-
-                /* The one piece of real work: crop to the zoom window and
-                 * rescale to Q6.10. Shared with CPU0's fallback path and with
-                 * the Linux app, so there is exactly one definition of it. */
-                preprocess( pxSlot->raw, pxSlot->q );
-
-                pxSlot->us = ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart );
-                pxShared->core1_busy_us += pxSlot->us;
-                pxShared->core1_frames++;
-
-                ampCacheClean( pxSlot->q, sizeof( pxSlot->q ) );
-                ampCacheClean( ( const void * ) pxShared, 32 );
-                dmb();
-
-                pxSlot->done = ulReq;
-                ampCacheClean( ( const void * ) pxSlot, AMP_SLOT_HEAD_BYTES );
-                dsb();
-
-                /* Doorbell: SGI AMP_SGI_DONE, target list = CPU0. */
-                GICD_SGIR = ( 1UL << 16 ) | AMP_SGI_DONE;
-            }
+            /* Nothing to do: sleep until CPU0's ampSubmit (or ampStopCore1)
+             * executes SEV. A SEV that lands between the check above and this
+             * WFE is latched in the event register, so no wake-up is lost --
+             * and CPU1 is not hammering uncached DDR3 while it waits. */
+            __asm__ volatile ( "wfe" );
+            continue;
         }
+
+        /* The real work: exactly the code the single-core build runs. */
+        ulStart = ulGlobalTimerNow();
+        vision_run( &pxJob->res );
+        ulUs = ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart );
+
+        pxShared->core1_busy_us += ulUs;
+        pxShared->core1_jobs++;
+
+        ampCacheClean( &pxJob->res, sizeof( pxJob->res ) );
+        ampCacheClean( ( const void * ) pxShared, 32 );
+        dmb();
+
+        pxJob->done = ulReq;
+        ampCacheClean( ( const void * ) pxJob, AMP_JOB_HEAD_BYTES );
+        dsb();
+
+        /* Doorbell: SGI AMP_SGI_DONE, target list = CPU0. */
+        GICD_SGIR = ( 1UL << 16 ) | AMP_SGI_DONE;
     }
 
     pxShared->core1_alive = 0;
@@ -185,14 +192,13 @@ int ampStartCore1( void )
     volatile uint32_t * pulTramp = ( volatile uint32_t * ) AMP_TRAMPOLINE_ADDR;
     uint32_t ulDeadline;
 
-    /* Clear the control fields; the frame buffers do not need zeroing. */
-    pxShared->magic        = AMP_MAGIC;
-    pxShared->core1_alive  = 0;
-    pxShared->core1_frames = 0;
+    /* Clear the control fields; the result does not need zeroing. */
+    pxShared->magic         = AMP_MAGIC;
+    pxShared->core1_alive   = 0;
+    pxShared->core1_jobs    = 0;
     pxShared->core1_busy_us = 0;
-    pxShared->stop         = 0;
-    pxShared->slot[ 0 ].req = pxShared->slot[ 0 ].done = 0;
-    pxShared->slot[ 1 ].req = pxShared->slot[ 1 ].done = 0;
+    pxShared->stop          = 0;
+    pxShared->job.req = pxShared->job.done = 0;
     ampCacheClean( ( const void * ) pxShared, sizeof( *pxShared ) );
 
     /* Hold CPU1 in reset while the trampoline and the start address are set
@@ -254,29 +260,32 @@ void ampStopCore1( void )
         AMP->stop = 1;
         ampCacheClean( ( const void * ) AMP, 32 );
         dsb();
+        __asm__ volatile ( "sev" );     /* CPU1 may be asleep in WFE */
     }
 }
 
-void ampSubmit( struct amp_slot * pxSlot )
+void ampSubmit( void )
 {
-    ampCacheClean( pxSlot->raw, sizeof( pxSlot->raw ) );
+    struct amp_job * pxJob = &AMP->job;
+
     dmb();
-    pxSlot->req++;
-    ampCacheClean( ( const void * ) pxSlot, AMP_SLOT_HEAD_BYTES );
+    pxJob->req++;
+    ampCacheClean( ( const void * ) pxJob, AMP_JOB_HEAD_BYTES );
     dsb();
     __asm__ volatile ( "sev" );
 }
 
-int ampWait( struct amp_slot * pxSlot, uint32_t ulTimeoutUs )
+int ampWait( uint32_t ulTimeoutUs )
 {
-    uint32_t ulStart = ulGlobalTimerNow();
+    struct amp_job * pxJob   = &AMP->job;
+    uint32_t         ulStart = ulGlobalTimerNow();
 
     for( ;; )
     {
-        ampCacheInvalidate( ( const void * ) pxSlot, AMP_SLOT_HEAD_BYTES );
-        if( pxSlot->done == pxSlot->req )
+        ampCacheInvalidate( ( const void * ) pxJob, AMP_JOB_HEAD_BYTES );
+        if( pxJob->done == pxJob->req )
         {
-            ampCacheInvalidate( pxSlot->q, sizeof( pxSlot->q ) );
+            ampCacheInvalidate( &pxJob->res, sizeof( pxJob->res ) );
             return 1;
         }
         if( ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart ) > ulTimeoutUs )
@@ -295,3 +304,4 @@ int ampWait( struct amp_slot * pxSlot, uint32_t ulTimeoutUs )
         }
     }
 }
+#endif /* RTOS_MODE */

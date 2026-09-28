@@ -144,7 +144,13 @@ begin
 	case(LUT_INDEX)
 	
 	//	Video Config Data
-	0	:	LUT_DATA	<=	16'h9803;  //Must be set to 0x03 for proper operation
+	//	Index 0 was a duplicate of index 16 (0x98 = 0x03, rewritten there after
+	//	the power-up at index 9). It now forces hot-plug detect: 0xD6[7:6] = 11,
+	//	"HPD always high". The ADV7513 keeps its TMDS output powered down while
+	//	it sees HPD low; on 2026-09-26 a monitor woke on the cable's +5 V but
+	//	reported "no input signal" with the config complete and INT clear (the
+	//	same symptom as the PT-VW340 projector), i.e. HPD never reached the chip.
+	0	:	LUT_DATA	<=	16'hD6C0;  //HPD control: always high (force transmitter on)
 	1	:	LUT_DATA	<=	16'h0100;  //Set 'N' value at 6144
 	2	:	LUT_DATA	<=	16'h0218;  //Set 'N' value at 6144
 	3	:	LUT_DATA	<=	16'h0300;  //Set 'N' value at 6144

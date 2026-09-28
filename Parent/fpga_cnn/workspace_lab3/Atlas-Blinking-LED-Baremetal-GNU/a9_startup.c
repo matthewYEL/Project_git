@@ -282,9 +282,21 @@ void vRunTimeStatsTimerInit( void )
     GT_CONTROL    = 1;
 }
 
+/* Bits [39:8] of the 64-bit count. The low word alone wraps every ~21.5 s at
+ * 200 MHz, and `LO >> 8` wrapped with it -- which is what turned the stats
+ * table into nonsense (a task at 2548%) after the first 21 s. The high word is
+ * re-read to catch a carry out of the low word between the two reads. */
 uint32_t ulRunTimeStatsCounter( void )
 {
-    return GT_COUNTER_LO >> 8;
+    uint32_t ulHi, ulLo;
+
+    do
+    {
+        ulHi = GT_COUNTER_HI;
+        ulLo = GT_COUNTER_LO;
+    } while( ulHi != GT_COUNTER_HI );
+
+    return ( ulHi << 24 ) | ( ulLo >> 8 );
 }
 
 /* Free-running microsecond-ish timebase for the "who did what" accounting in

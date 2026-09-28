@@ -1,4 +1,8 @@
-module camera_capture (
+module camera_capture #(
+    // image RAM word width; set once in ghrd_top.v and passed to both this
+    // (the writer) and card_cnn_core (the reader)
+    parameter IMG_DW = 10
+)(
     input  wire        clk50,
     input  wire        clk2_50,
     input  wire        rst_n,             // 来自ghrd_top的hps_fpga_reset_n
@@ -26,31 +30,39 @@ module camera_capture (
     output wire [4:0]  dbg_lut_index,
     output wire        dbg_ack, dbg_ready_latched, dbg_hdmi_int,
 
-    // 给HPS读取snapshot数据 (48x48 = 2304 words; addr 2304 = red_count, 2305 = colour flag)
-    // 2306 = vs_count, 2307 = pixclk_ticks, 2308 = retry_count,
-    // 2309 = config STEP,
-    // 2310 = {hdmi_ready, audio_pll_ok, camera_release, mipi_release},
-    // 2311 = wde_ticks (frame-buffer write-enable activity)
+    // image write port -> card_cnn_core.u_img (dual-clock; card_cnn_core reads
+    // it on clk50). capture_384.v owns this now -- the old design's HPS-side
+    // snapshot readback + rescale + re-upload is gone; the fabric writes the
+    // image RAM directly.
+    output wire        img_wr_en,
+    output wire [17:0] img_wr_addr,
+    output wire [IMG_DW-1:0] img_wr_data,
+
+    // 给HPS读取诊断数据 (addr 0 = red_count (saturated to 16 bit), 1 = colour flag,
+    // 2 = vs_count, 3 = pixclk_ticks, 4 = retry_count, 5 = config STEP,
+    // 6 = {hdmi_ready, audio_pll_ok, camera_release, mipi_release},
+    // 7 = wde_ticks (frame-buffer write-enable activity))
     //        NB pll_ok is the AUDIO PLL (it feeds HDMI_TX_AD7513), not the video
     //        one -- VIDEO_PLL has no locked port wired, but VGA_CLK comes from it
     //        so a completing snapshot already proves it is locked.
-    input  wire [11:0] hps_rd_addr,
-    output wire [15:0] hps_rd_data,
+    // ghrd_top.v maps these onto snapshot_addr IMG_PIXELS + n, the same order
+    // card_pipeline.h's SNAP_* constants have always used -- only IMG_PIXELS
+    // moved. Combinational; ghrd_top registers the result to line up with the
+    // image RAM's one-cycle read.
+    input  wire [2:0]  hps_diag_addr,
+    output wire [15:0] hps_diag_data,
     output wire        snapshot_done,
     output wire        snapshot_colour,   // 1 = red card (hardware detector), latched with the snapshot
 
-    // CNN prediction, for the HDMI on-screen text. Driven from ghrd_top's
-    // fpga_clk_50 domain; see the toggle-CDC comment where it is sampled below.
-    input  wire [3:0]  cnn_disp_rank,
-    input  wire [1:0]  cnn_disp_suit,
-    input  wire        cnn_disp_joker,
-    input  wire        cnn_disp_toggle
+    // HDMI text layer write port (clk50): the HPS GUI's cells, see text_overlay.v
+    input  wire        txt_wr_en,
+    input  wire [11:0] txt_wr_addr,
+    input  wire [15:0] txt_wr_data
 );
 
     wire RESET_N, RESET_N_DELAY;
     wire cfg_reset_n;
     wire [9:0]  cfg_step;
-    wire [15:0] ds_rd_data;
     wire MIPI_BRIDGE_RELEASE, CAMERA_MIPI_RELAESE;
     wire AUD_CTRL_CLK, PLL_TEST_OK, VGA_CLK;
     wire [9:0] RD_DATA;
@@ -60,160 +72,40 @@ module camera_capture (
     wire [10:0] cur_x, cur_y;
     wire HDMI_I2S_int;
 
-    // 320x240 display window. The frame buffer now holds a Bayer-skipped
-    // 320x240 image; it is shown centred in the 640x480 frame, black elsewhere.
+    // 320x240 display window. The frame buffer holds a Bayer-skipped 320x240
+    // image, shown at the top left of the 640x480 frame; the HPS's text layer
+    // (text_overlay.v) fills the rest. PV_X/PV_Y sit on the 8x16 text grid, so
+    // the preview is exactly text cols 1..40, rows 2..16 and the GUI can frame
+    // it. Moving the window is safe: RAW2RGB_J's X/Y counters and the FRAM read
+    // address are both relative to disp_win, so the Bayer phase does not move.
     // RGB out of RAW2RGB_J lags READ_Request by 4 clocks (FRAM 2 + line
     // buffer 1 + RAW_RGB_BIN 1), so the HDMI mux uses the delayed window.
-    wire disp_win = READ_Request && (cur_x >= 11'd160) && (cur_x < 11'd480)
-                                 && (cur_y >= 11'd120) && (cur_y < 11'd360);
+    localparam [10:0] PV_X = 11'd8;
+    localparam [10:0] PV_Y = 11'd32;
+    wire disp_win = READ_Request && (cur_x >= PV_X) && (cur_x < PV_X + 11'd320)
+                                 && (cur_y >= PV_Y) && (cur_y < PV_Y + 11'd240);
     reg  [3:0] win_sr;
     always @(posedge VGA_CLK) win_sr <= {win_sr[2:0], disp_win};
     wire disp_win_d = win_sr[3];
 
-    // 1-px green frame around the CNN crop (screen x 200..439, y 120..359).
-    // The model classifies the card's rank/suit index corner, so aim that corner
-    // into the box. Delayed by the same 4 clocks so it lines up with the image.
+    // 1-px green frame around the CNN crop (screen x 72..263, y 56..247).
+    // capture_384.v now crops 384x384 RAW camera pixels directly (not via
+    // the decimated display buffer), so the box is derived from the display
+    // buffer's own 2x downsample of the raw stream: buffer_x = raw_x/2,
+    // screen_x = PV_X + buffer_x (disp_win's origin). Raw crop x128..511,
+    // y48..431 (see capture_384.v) maps to buffer x 64..255, y 24..215 --
+    // centred in the preview and square. The model classifies the card's
+    // rank/suit index corner, so aim that corner into the box -- it should
+    // fill the box top to bottom. Delayed by the same 4 clocks so it lines up
+    // with the image.
     wire crop_edge = disp_win && (
-        ((cur_x == 11'd200 || cur_x == 11'd439) && (cur_y >= 11'd120) && (cur_y < 11'd360)) ||
-        ((cur_y == 11'd120 || cur_y == 11'd359) && (cur_x >= 11'd200) && (cur_x < 11'd440)));
+        ((cur_x == PV_X + 11'd64 || cur_x == PV_X + 11'd255) &&
+         (cur_y >= PV_Y + 11'd24) && (cur_y < PV_Y + 11'd216)) ||
+        ((cur_y == PV_Y + 11'd24 || cur_y == PV_Y + 11'd215) &&
+         (cur_x >= PV_X + 11'd64) && (cur_x < PV_X + 11'd256)));
     reg  [3:0] edge_sr;
     always @(posedge VGA_CLK) edge_sr <= {edge_sr[2:0], crop_edge};
     wire crop_edge_d = edge_sr[3];
-
-    // ---------- HDMI on-screen prediction text ----------
-    // cnn_disp_* come from ghrd_top's fpga_clk_50 domain, latched once per
-    // completed inference (~52 ms apart) with cnn_disp_toggle flipping
-    // alongside them. That gap is far longer than any VGA_CLK period, so a
-    // plain 3-flop synchronizer on the toggle, followed by sampling the
-    // already-stable data on its edge, is a safe CDC here.
-    reg [2:0] disp_tog_sync;
-    always @(posedge VGA_CLK) disp_tog_sync <= {disp_tog_sync[1:0], cnn_disp_toggle};
-    wire disp_tog_edge = disp_tog_sync[1] ^ disp_tog_sync[2];
-
-    reg [3:0] rank_v;
-    reg [1:0] suit_v;
-    reg       joker_v;
-    // have_result's only other assignment is 1'b1 with no way back to 0, so
-    // without this reset Quartus proves it converges to a constant and
-    // folds/removes it ("stuck at VCC due to stuck port data_in", same trap
-    // the wde_ticks comment above already documents for a different signal).
-    reg       have_result;
-    always @(posedge VGA_CLK or negedge RESET_N) begin
-        if (!RESET_N) begin
-            have_result <= 1'b0;
-        end else if (disp_tog_edge) begin
-            rank_v      <= cnn_disp_rank;
-            suit_v      <= cnn_disp_suit;
-            joker_v     <= cnn_disp_joker;
-            have_result <= 1'b1;
-        end
-    end
-
-    // Left-justified 5-character field: "JOKER", "<rank><suit>" (2-3 chars,
-    // e.g. "AS", "10D" -- same rank/suit encoding atlas_main.c's RANK_NAMES/
-    // SUIT_NAMES decode), or all-blank before the first result.
-    reg [7:0] suit_ch;
-    always @(*) case (suit_v)
-        2'd0: suit_ch = "S";
-        2'd1: suit_ch = "C";
-        2'd2: suit_ch = "H";
-        default: suit_ch = "D";
-    endcase
-
-    reg [7:0] disp_ch0, disp_ch1, disp_ch2, disp_ch3, disp_ch4;
-    always @(*) begin
-        disp_ch0 = " "; disp_ch1 = " "; disp_ch2 = " ";
-        disp_ch3 = " "; disp_ch4 = " ";
-        if (have_result) begin
-            if (joker_v) begin
-                disp_ch0 = "J"; disp_ch1 = "O"; disp_ch2 = "K";
-                disp_ch3 = "E"; disp_ch4 = "R";
-            end else begin
-                case (rank_v)
-                    4'd0:  disp_ch0 = "2";
-                    4'd1:  disp_ch0 = "3";
-                    4'd2:  disp_ch0 = "4";
-                    4'd3:  disp_ch0 = "5";
-                    4'd4:  disp_ch0 = "6";
-                    4'd5:  disp_ch0 = "7";
-                    4'd6:  disp_ch0 = "8";
-                    4'd7:  disp_ch0 = "9";
-                    4'd8:  begin disp_ch0 = "1"; disp_ch1 = "0"; end
-                    4'd9:  disp_ch0 = "J";
-                    4'd10: disp_ch0 = "Q";
-                    4'd11: disp_ch0 = "K";
-                    default: disp_ch0 = "A";            // 4'd12
-                endcase
-                if (rank_v == 4'd8) disp_ch2 = suit_ch;  // "10" already used slots 0-1
-                else                disp_ch1 = suit_ch;
-            end
-        end
-    end
-
-    // 5 cells x 16x16 px (8x8 font, 2x scale), centred over 640, in the
-    // black margin above the camera window (which starts at cur_y 120).
-    localparam [10:0] TEXT_X0 = 11'd280;
-    localparam [10:0] TEXT_Y0 = 11'd20;
-    wire [10:0] text_dx = cur_x - TEXT_X0;
-    wire [10:0] text_dy = cur_y - TEXT_Y0;
-    wire text_area  = (cur_x >= TEXT_X0) && (text_dx < 11'd80) &&
-                       (cur_y >= TEXT_Y0) && (text_dy < 11'd16);
-    wire [2:0] cell_idx  = text_dx[6:4];   // /16 -> 0..4
-    wire [2:0] glyph_col = text_dx[3:1];   // 2x scale
-    wire [2:0] glyph_row = text_dy[3:1];
-
-    reg [7:0] cell_ch;
-    always @(*) case (cell_idx)
-        3'd0: cell_ch = disp_ch0;
-        3'd1: cell_ch = disp_ch1;
-        3'd2: cell_ch = disp_ch2;
-        3'd3: cell_ch = disp_ch3;
-        default: cell_ch = disp_ch4;
-    endcase
-
-    wire [7:0] glyph_bits = font8x8_row(cell_ch, glyph_row);
-    wire text_pixel = text_area && glyph_bits[7 - glyph_col];
-
-    reg [3:0] text_sr;
-    always @(posedge VGA_CLK) text_sr <= {text_sr[2:0], text_pixel};
-    wire text_pixel_d = text_sr[3];
-
-    // Minimal 8x8 font, only the glyphs the overlay can ever need: digits,
-    // rank letters (J/Q/K/A), suit letters (S/C/H/D), and JOKER's O/E/R.
-    // Row 7 (and anything unrecognised) is blank -- that's the font's own
-    // line-spacing row, not a missing-glyph fallback.
-    function [7:0] font8x8_row;
-        input [7:0] ascii;
-        input [2:0] row;
-        reg   [7:0] r;
-        begin
-            case (ascii)
-                "0": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h6E; 3'd3:r=8'h76; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "1": case(row) 3'd0:r=8'h18; 3'd1:r=8'h18; 3'd2:r=8'h38; 3'd3:r=8'h18; 3'd4:r=8'h18; 3'd5:r=8'h18; 3'd6:r=8'h7E; default:r=8'h00; endcase
-                "2": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h06; 3'd3:r=8'h0C; 3'd4:r=8'h30; 3'd5:r=8'h60; 3'd6:r=8'h7E; default:r=8'h00; endcase
-                "3": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h06; 3'd3:r=8'h1C; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "4": case(row) 3'd0:r=8'h0C; 3'd1:r=8'h1C; 3'd2:r=8'h2C; 3'd3:r=8'h4C; 3'd4:r=8'h7E; 3'd5:r=8'h0C; 3'd6:r=8'h0C; default:r=8'h00; endcase
-                "5": case(row) 3'd0:r=8'h7E; 3'd1:r=8'h60; 3'd2:r=8'h7C; 3'd3:r=8'h06; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "6": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h60; 3'd3:r=8'h7C; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "7": case(row) 3'd0:r=8'h7E; 3'd1:r=8'h06; 3'd2:r=8'h0C; 3'd3:r=8'h18; 3'd4:r=8'h30; 3'd5:r=8'h30; 3'd6:r=8'h30; default:r=8'h00; endcase
-                "8": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h3C; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "9": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h3E; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "A": case(row) 3'd0:r=8'h18; 3'd1:r=8'h3C; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h7E; 3'd5:r=8'h66; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "C": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h60; 3'd3:r=8'h60; 3'd4:r=8'h60; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "D": case(row) 3'd0:r=8'h78; 3'd1:r=8'h6C; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h66; 3'd5:r=8'h6C; 3'd6:r=8'h78; default:r=8'h00; endcase
-                "E": case(row) 3'd0:r=8'h7E; 3'd1:r=8'h60; 3'd2:r=8'h60; 3'd3:r=8'h7C; 3'd4:r=8'h60; 3'd5:r=8'h60; 3'd6:r=8'h7E; default:r=8'h00; endcase
-                "H": case(row) 3'd0:r=8'h66; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h7E; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "J": case(row) 3'd0:r=8'h1E; 3'd1:r=8'h0C; 3'd2:r=8'h0C; 3'd3:r=8'h0C; 3'd4:r=8'h0C; 3'd5:r=8'h6C; 3'd6:r=8'h38; default:r=8'h00; endcase
-                "K": case(row) 3'd0:r=8'h66; 3'd1:r=8'h6C; 3'd2:r=8'h78; 3'd3:r=8'h70; 3'd4:r=8'h78; 3'd5:r=8'h6C; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "O": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h66; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                "Q": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h66; 3'd4:r=8'h6E; 3'd5:r=8'h6C; 3'd6:r=8'h36; default:r=8'h00; endcase
-                "R": case(row) 3'd0:r=8'h7C; 3'd1:r=8'h66; 3'd2:r=8'h66; 3'd3:r=8'h7C; 3'd4:r=8'h6C; 3'd5:r=8'h66; 3'd6:r=8'h66; default:r=8'h00; endcase
-                "S": case(row) 3'd0:r=8'h3C; 3'd1:r=8'h66; 3'd2:r=8'h60; 3'd3:r=8'h3C; 3'd4:r=8'h06; 3'd5:r=8'h66; 3'd6:r=8'h3C; default:r=8'h00; endcase
-                default: r = 8'h00;
-            endcase
-            font8x8_row = r;
-        end
-    endfunction
 
     assign CAMERA_PWDN_n = 1'b1;
     assign MIPI_CS_n     = 1'b0;
@@ -273,10 +165,20 @@ module camera_capture (
 
     assign dbg_hdmi_int = HDMI_TX_INT;
 
+    // HPS text layer: same 4-clock lag as disp_win_d / crop_edge_d / RGB.
+    // Glyph pixels may overlay the video; cell backgrounds never cover it.
+    wire        txt_fg;
+    wire [23:0] txt_fg_rgb, txt_bg_rgb;
+    text_overlay u_text (
+        .wr_clk(clk50), .wr_en(txt_wr_en), .wr_addr(txt_wr_addr), .wr_data(txt_wr_data),
+        .clk(VGA_CLK), .x(cur_x), .y(cur_y),
+        .fg_on(txt_fg), .fg_rgb(txt_fg_rgb), .bg_rgb(txt_bg_rgb)
+    );
+
     assign HDMI_TX_CLK = VGA_CLK;
-    assign HDMI_TX_D   = crop_edge_d  ? 24'h00FF00 :                   // green crop box
-                         text_pixel_d ? 24'hFFFFFF :                   // predicted card, top margin
-                         disp_win_d   ? {RED, GREEN, BLUE} : 24'd0;
+    assign HDMI_TX_D   = crop_edge_d ? 24'h00FF00 :                    // green crop box
+                         txt_fg      ? txt_fg_rgb :                    // text glyph pixel
+                         disp_win_d  ? {RED, GREEN, BLUE} : txt_bg_rgb;
     assign HDMI_TX_DE  = READ_Request;      // full 640x480 active area for the monitor
     assign HDMI_TX_HS  = VGA_HS;
     assign HDMI_TX_VS  = VGA_VS;
@@ -288,20 +190,31 @@ module camera_capture (
     assign dbg_pll_ok         = PLL_TEST_OK;
 
     // ---------- 拍照捕获：触发信号来自HPS ----------
-    // 跨时钟域：capture_trigger_in 来自50MHz域(HPS/PIO)，这里同步到VGA_CLK域
-    reg [2:0] trig_sync;
-    always @(posedge VGA_CLK) trig_sync <= {trig_sync[1:0], capture_trigger_in};
-    wire capture_trigger_vga = trig_sync[1] & ~trig_sync[2];
-
-    // 48x48 box-sum downsampler + snapshot RAM + red/black detector.
-    // The HPS read port runs on clk50 so the PIO path is single-domain.
-    downsample_48x48 u_ds (
-        .vga_clk(VGA_CLK), .vga_vs(VGA_VS), .win(disp_win),
-        .red(RED), .green(GREEN), .blue(BLUE),
-        .capture_trigger(capture_trigger_vga),
-        .rd_clk(clk50), .rd_addr(hps_rd_addr), .rd_data(ds_rd_data),
-        .snapshot_done(snapshot_done), .colour_hw(snapshot_colour)
+    // capture_384 syncs capture_trigger_in itself (MIPI_PIXEL_CLK domain --
+    // downsample_96x96's VGA_CLK sync is gone along with the VGA_CLK tap).
+    //
+    // 384x384 1:1 capture + red/black detector, tapping the RAW MIPI stream
+    // directly (not the decimated display buffer -- see capture_384.v's
+    // header for why). snapshot_done/snapshot_colour are still exported on
+    // clk50 for the HPS PIO path; the values themselves are set on
+    // MIPI_PIXEL_CLK and held stable (sticky) well past any metastability
+    // window, same as the old downsample_96x96 path relied on.
+    wire [17:0] ds_red_count;
+    capture_384 #(.IMG_DW(IMG_DW)) u_ds (
+        .mipi_clk(MIPI_PIXEL_CLK), .mipi_data(MIPI_PIXEL_D),
+        .mipi_hs(MIPI_PIXEL_HS), .mipi_vs(MIPI_PIXEL_VS),
+        .capture_trigger(capture_trigger_in),
+        .img_wr_en(img_wr_en), .img_wr_addr(img_wr_addr), .img_wr_data(img_wr_data),
+        .snapshot_done(snapshot_done), .colour_hw(snapshot_colour),
+        .red_count(ds_red_count)
     );
+    // Saturate to 16 bits for the diagnostic register -- red_count is a count
+    // of red pixels in a 147,456-pixel crop (18 bits), but RED_THRESH (1536)
+    // means a real reading rarely approaches even 16 bits; saturating rather
+    // than wrapping keeps a debug read from showing a confusingly small
+    // wrapped number if it ever does.
+    wire [15:0] ds_red_count_sat = (ds_red_count > 18'd65535) ? 16'hFFFF
+                                                               : ds_red_count[15:0];
 
     // ---------- camera link diagnostics + config auto-retry ----------
     // The I2C config sequence runs exactly once off RESET_N_DELAY and nothing
@@ -382,20 +295,19 @@ module camera_capture (
 
     assign cfg_reset_n = RESET_N_DELAY & ~retry_pulse;
 
-    // downsample_48x48 registers rd_addr internally, so its data is valid one
-    // clk50 cycle after the address. Match that delay here or the diagnostic
-    // words land one read early.
-    reg [11:0] rd_addr_d;
-    always @(posedge clk50) rd_addr_d <= hps_rd_addr;
-
-    assign hps_rd_data =
-        (rd_addr_d == 12'd2306) ? vs_count :
-        (rd_addr_d == 12'd2307) ? pixclk_ticks :
-        (rd_addr_d == 12'd2308) ? retry_count :
-        (rd_addr_d == 12'd2309) ? {6'b0, cfg_step} :
-        (rd_addr_d == 12'd2310) ? {12'b0, HDMI_READY, PLL_TEST_OK,
+    // A small fixed-size diagnostic register file, not the image-address-space
+    // mux the 96x96 build used (there is no snapshot RAM here to share a read
+    // port with -- capture_384 writes the image RAM directly). Combinational:
+    // nothing here is registered RAM, so no read-address delay is needed.
+    assign hps_diag_data =
+        (hps_diag_addr == 3'd0) ? ds_red_count_sat :
+        (hps_diag_addr == 3'd1) ? {15'b0, snapshot_colour} :
+        (hps_diag_addr == 3'd2) ? vs_count :
+        (hps_diag_addr == 3'd3) ? pixclk_ticks :
+        (hps_diag_addr == 3'd4) ? retry_count :
+        (hps_diag_addr == 3'd5) ? {6'b0, cfg_step} :
+        (hps_diag_addr == 3'd6) ? {12'b0, HDMI_READY, PLL_TEST_OK,
                                    CAMERA_MIPI_RELAESE, MIPI_BRIDGE_RELEASE} :
-        (rd_addr_d == 12'd2311) ? wde_ticks :
-                                  ds_rd_data;
+                                  wde_ticks;
 
 endmodule
