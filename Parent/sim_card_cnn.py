@@ -24,6 +24,8 @@ Companion to sim_cnn.py, which models the OLD 28x28 single-head datapath
 
   python sim_card_cnn.py capture.txt          # paste of the Arm DS console, or a bare .pgm
   python sim_card_cnn.py capture.txt --png    # also render the capture to a .png
+  python sim_card_cnn.py --frames dumps/deck.log   # every SW1 dump in a PuTTY log -> PNG
+  python sim_card_cnn.py --scan dumps/deck.log     # replay every grid scan in it
 
 Both colour branches are printed; read the one matching the board's colour_hw.
 
@@ -170,22 +172,50 @@ def infer(img, colour_red, verbose=False):
 
 # ---------------- input ----------------
 
+def _pgm_blocks(path):
+    """Every P2 block in a file: a bare .pgm, one console paste, or a whole
+    PuTTY session log holding many SW1 dumps. Yields (k, w, h, maxval, words),
+    k counting every P2 header from 1 so it follows the shot order even when a
+    truncated dump (PuTTY closed, a key typed mid-dump) is skipped."""
+    tok = open(path, encoding='latin-1').read().split()    # latin-1: line noise never fails
+    k = 0
+    for i, t in enumerate(tok):
+        if t != 'P2':
+            continue
+        k += 1
+        try:
+            w, h, maxval = int(tok[i + 1]), int(tok[i + 2]), int(tok[i + 3])
+        except (IndexError, ValueError):
+            print(f'{path}: dump {k}: unreadable P2 header, skipped', file=sys.stderr)
+            continue
+        px = tok[i + 4:i + 4 + w * h]
+        n = next((j for j, v in enumerate(px) if not v.isdigit()), len(px))
+        if n < w * h:
+            print(f'{path}: dump {k}: expected {w * h} pixels, found {n} -- truncated, skipped',
+                  file=sys.stderr)
+            continue
+        yield k, w, h, maxval, np.array(px, dtype=np.int64).reshape(h, w)
+
+
+def _first_block(path):
+    blk = next(_pgm_blocks(path), None)
+    if blk is None:
+        sys.exit(f'{path}: no complete "P2" block -- paste the block from the console')
+    return blk
+
+
 def load_capture(path):
     """Accept a bare P2 .pgm or a raw paste of the Arm DS console around it.
 
     Returns (pixels, zoom) where zoom is (x, y, w, h) if the paste carried
     atlas_main.c's "zoom window:" line, else None.
     """
-    text = open(path).read()
-    tok = text.split()
-    try:
-        i = tok.index('P2')
-    except ValueError:
-        sys.exit(f'{path}: no "P2" found -- paste the block from the console')
-    w, h, _maxval = int(tok[i + 1]), int(tok[i + 2]), tok[i + 3]
-    px = tok[i + 4:i + 4 + w * h]
-    if len(px) < w * h:
-        sys.exit(f'{path}: expected {w * h} pixels, found {len(px)} -- paste is truncated')
+    text = open(path, encoding='latin-1').read()
+    _, w, h, maxval, px = _first_block(path)
+    if maxval == 1023:
+        # a 29 Sep whole-frame dump: the raw words, gray*4 with the red bit in
+        # bit 0 -- the grey is what every caller here wants (load_frame keeps red)
+        px = px >> 2
 
     zoom = None
     if 'zoom window:' in text:
@@ -194,7 +224,88 @@ def load_capture(path):
             zoom = tuple(int(t.split('=')[1]) for t in f)      # x= y= w= h=
         except (IndexError, ValueError):
             print(f'{path}: "zoom window:" line unreadable, ignoring', file=sys.stderr)
-    return np.array(px, dtype=np.int64).reshape(h, w), zoom
+    return px, zoom
+
+
+def load_frame(path):
+    """A board whole-frame dump (SW1, maxval 1023) -> (grey, red mask), both
+    FRAME_H x FRAME_W, exactly what the board's locate and window mapper read.
+    The first dump in the file; scan() and frames() walk all of them."""
+    _, w, h, maxval, words = _first_block(path)
+    if maxval != 1023:
+        sys.exit(f'{path}: maxval {maxval} -- a --scan needs the raw 1023-scale frame dump of the 29 Sep app')
+    return words >> 2, (words & 1).astype(bool)
+
+
+# app_rtos.c ORIENTS[]: 0 upright, 1 camera turned clockwise, 2 anticlockwise, 3 180
+SCAN_ORIENTS = [(False, False, False), (True, True, False), (True, False, True), (False, True, True)]
+
+
+def scan(path, orient_idx=0):
+    """Replay every board grid scan in a file -- one SW1 whole-frame dump or a
+    PuTTY log of many: each frame through locate + the window mapper + the
+    bit-exact network with the board's vote (read_cards, prvReadCard), printed
+    like the board's UART lines so the two can be compared card for card."""
+    import locate
+    orient = SCAN_ORIENTS[orient_idx]
+    done = 0
+    for k, w, h, maxval, words in _pgm_blocks(path):
+        if maxval != 1023:
+            print(f'{path} dump {k}: maxval {maxval} -- not a 29 Sep whole-frame dump, skipped')
+            continue
+        if done:
+            print()
+        done += 1
+        gray, red = words >> 2, (words & 1).astype(bool)
+        info = {}
+        cards = locate.locate(gray.astype(np.uint8), orient=orient, info=info)
+        nr = max((c.row for c in cards), default=0)
+        nc = max((c.col for c in cards), default=0)
+        print(f'{path} dump {k}: {len(cards)} card(s) in {nr} row(s) x {nc} column(s)'
+              f'  (threshold {info["threshold"]})')
+        reads = read_cards(gray, red, orient)
+        got = []
+        for card, (r, s, score, j), rf, win, is_red, nread, agree, _single in reads:
+            name = 'JOKER' if j else f'{r} of {s}'
+            print(f'  ({card.row},{card.col})  {name:<18} logit {score:6d}  {"red" if is_red else "black":<5}'
+                  f'  [{nread} reads, {agree} agree]   box x{card.x0}-{card.x1} y{card.y0}-{card.y1}')
+            got.append((card.row, card.col, r, s, j))
+        print('  pairs:')
+        for line in pair_lines(got) or ['none']:
+            print('    ' + line)
+    if not done:
+        sys.exit(f'{path}: no whole-frame dump (P2, maxval 1023) found')
+
+
+def frames(path):
+    """--frames: every frame dump in a file (a paste or a whole PuTTY log) ->
+    <file>_<k>.png beside it, 2x nearest, the red-test bits tinted red, plus one
+    exposure line each. Mat and card levels are split the way locate splits
+    them (Otsu): the card whites want ~170-230 with little at 255."""
+    import locate
+    try:
+        from PIL import Image
+    except ImportError:
+        sys.exit('--frames needs Pillow: python -m pip install pillow')
+    stem, n = os.path.splitext(path)[0], 0
+    for k, w, h, maxval, words in _pgm_blocks(path):
+        n += 1
+        gray = words >> 2 if maxval == 1023 else words * 255 // maxval
+        rgb = np.repeat(gray[:, :, None], 3, axis=2).astype(np.uint8)
+        if maxval == 1023:
+            red = (words & 1).astype(bool)
+            g = gray[red]
+            rgb[red] = np.stack([(g + 255) // 2, g // 2, g // 2], axis=1)
+        out = f'{stem}_{k}.png'
+        Image.fromarray(rgb).resize((2 * w, 2 * h), Image.NEAREST).save(out)
+        t = locate.otsu(np.bincount(gray.ravel(), minlength=256))
+        mat, card = gray[gray <= t], gray[gray > t]
+        print(f'dump {k}: {w}x{h}  grey {gray.min()}-{gray.max()}'
+              f'  mat {int(np.median(mat)) if mat.size else "-"}'
+              f'  cards {int(np.median(card)) if card.size else "-"} (split {t})'
+              f'  at 255: {100 * np.mean(gray >= 255):.1f} %  -> {out}')
+    if not n:
+        sys.exit(f'{path}: no complete "P2" block found')
 
 
 def apply_zoom(p, zoom):
@@ -281,6 +392,246 @@ def sweep(caps, truths):
         print('\nPROVISIONAL -- tuned on %d capture(s). A window fitted to one card '
               'means nothing;\nre-run with at least 3 different cards before '
               'trusting it.' % len(caps))
+
+
+# ---------------- whole-grid scan (M2 demo): frame -> cards -> windows ----------------
+
+def fabric_luma(bgr):
+    """capture_384.v's grey: (77R + 150G + 29B) >> 8, from an 8-bit BGR image."""
+    b, g, r = (bgr[:, :, i].astype(np.int64) for i in range(3))
+    return (77 * r + 150 * g + 29 * b) >> 8
+
+
+def fabric_red(bgr):
+    """capture_384.v's is_red: R > 64, R > 1.5 G, R > 1.5 B (integer halves)."""
+    b, g, r = (bgr[:, :, i].astype(np.int64) for i in range(3))
+    return (r > 64) & (r > g + (g >> 1)) & (r > b + (b >> 1))
+
+
+def window_map(frame, x0, y0, step, flags=0, clip=None):
+    """conv1's window mapper (conv_layer.v WIN_MAP): the DIM x DIM virtual input
+    read out of the stored grey frame.
+
+    Virtual pixel (iy, ix): u = DIM-1-ix if flip-x else ix, v likewise from iy
+    with flip-y; su = (u*STEP)>>8, sv = (v*STEP)>>8 (STEP is Q8.8); the frame
+    pixel is (col, row) = (X0+sv, Y0+su) with transpose, else (X0+su, Y0+sv).
+    Taps outside the clip rectangle (inclusive) or the frame read 0 -- the zero
+    conv1's padding reads. flags: 1 transpose, 2 flip x, 4 flip y."""
+    fh, fw = frame.shape
+    i = np.arange(DIM)
+    su = (((DIM - 1 - i) if flags & 2 else i) * step) >> 8      # from ix
+    sv = (((DIM - 1 - i) if flags & 4 else i) * step) >> 8      # from iy
+    if flags & 1:
+        col = np.broadcast_to(x0 + sv[:, None], (DIM, DIM))
+        row = np.broadcast_to(y0 + su[None, :], (DIM, DIM))
+    else:
+        col = np.broadcast_to(x0 + su[None, :], (DIM, DIM))
+        row = np.broadcast_to(y0 + sv[:, None], (DIM, DIM))
+    cx0, cy0, cx1, cy1 = clip if clip is not None else (0, 0, fw - 1, fh - 1)
+    ok = ((col >= max(cx0, 0)) & (col <= min(cx1, fw - 1)) &
+          (row >= max(cy0, 0)) & (row <= min(cy1, fh - 1)))
+    out = np.zeros((DIM, DIM), dtype=np.int64)
+    out[ok] = frame[row[ok], col[ok]]
+    return out
+
+
+# app_rtos.c VARIANTS, the same table: the vote's windows as (dx, dy, zoom per
+# mille, FLAGS toggle). The first SCAN_READS are read for every card; a card
+# whose identity turns up twice in the grid is read with all of them.
+VARIANTS = [(0, 0, 1000, 0),        # as is
+            (0, 0, 1000, 6),        # turned 180 deg (flip x and y)
+            (3, 0, 1000, 0),        # shifted x + 3 px
+            (0, -3, 1000, 6),       # shifted y - 3 px, turned
+            (0, 0, 1050, 0),        # zoomed out 5 %
+            (-3, 0, 1000, 6),       # duplicates only: shifted x - 3 px, turned
+            (0, 0, 950, 0)]         # duplicates only: zoomed in 5 %
+SCAN_READS = 5                      # app_config.h
+
+
+def _ident(r):
+    return 'JOKER' if r[3] else r[0] + r[1]
+
+
+def _read_variants(gray, card, base, is_red, n):
+    """The card through the first n VARIANTS windows, as prvReadCard reads it:
+    ([(rank, suit, score, joker), ...], the as-is window)."""
+    x0, y0, step, flags, clip = base
+    reads, first = [], None
+    for dx, dy, zoom, flip in VARIANTS[:n]:
+        vx, vy, vs = x0, y0, step
+        if zoom != 1000:                      # rescale, centred on the card again
+            vs = min(511, max(1, (step * zoom + 500) // 1000))
+            span = ((DIM - 1) * vs) >> 8
+            vx = (card.x0 + card.x1 - span + 1) // 2
+            vy = (card.y0 + card.y1 - span + 1) // 2
+        win = window_map(gray, vx + dx, vy + dy, vs, flags ^ flip, clip)
+        first = win if first is None else first
+        reads.append(infer(to_q(win), is_red))
+    return reads, first
+
+
+def _vote(reads):
+    """prvReadCard's vote: the most frequent identity, ties to the higher summed
+    rank logit, then the earlier one. Returns (that identity's highest-logit
+    read -- the earliest on a tie -- and how many reads agreed)."""
+    best, best_n, best_s = None, 0, 0
+    for i in dict.fromkeys(_ident(r) for r in reads):      # in order of first appearance
+        members = [r for r in reads if _ident(r) == i]
+        n, s = len(members), sum(r[2] for r in members)
+        if n > best_n or (n == best_n and s > best_s):
+            best, best_n, best_s = i, n, s
+    return max((r for r in reads if _ident(r) == best), key=lambda r: r[2]), best_n
+
+
+def read_cards(gray, red, orient=(False, False, False), reads=SCAN_READS):
+    """The board's scan in software: locate the cards, then `reads` bit-exact
+    CNN reads per card through window_map and the vote, then the duplicate
+    re-read -- exactly app_rtos.c prvScan. Returns [(card, (rank, suit, score,
+    joker), red_fraction, as-is window, is_red, reads taken, reads agreeing,
+    the as-is read alone)] in (row, col) order; is_red is locate's integer rule
+    (red px x RED_PER > index-box px), as on the board."""
+    import locate
+    fh, fw = gray.shape
+    rows = []
+    for card in locate.locate(gray.astype(np.uint8), orient=orient):
+        base = locate.window_params(card, fw, fh, orient=orient)
+        n, area = locate.index_red(red, card)
+        is_red = n * locate.RED_PER > area
+        rs, win = _read_variants(gray, card, base, is_red, reads)
+        chosen, agree = _vote(rs)
+        rows.append([card, chosen, n / area, win, is_red, reads, agree, rs[0], base])
+    # one deck, so the same card twice is a misread: read both with every window
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a = rows[i][1]
+            if a[3] or _ident(a) != _ident(rows[j][1]):
+                continue
+            for m in (i, j):
+                if rows[m][5] >= len(VARIANTS):
+                    continue
+                rs, _ = _read_variants(gray, rows[m][0], rows[m][8], rows[m][4], len(VARIANTS))
+                rows[m][1], rows[m][6] = _vote(rs)
+                rows[m][5] = len(VARIANTS)
+    return [tuple(r[:8]) for r in rows]
+
+
+def pair_lines(reads):
+    """'7: 7H (1,1) + 7D (2,2)'-style lines from [(row, col, rank, suit, joker)]."""
+    import locate
+    lines = []
+    for key, members in locate.rank_groups(reads):
+        cards = ' + '.join(f'{"JOKER" if key == "JOKER" else r + s[0]} ({row},{col})'
+                           for row, col, r, s in members)
+        tag = '' if len(members) == 2 else f'   [{len(members)} of a kind]'
+        lines.append(f'{key}: {cards}{tag}')
+    return lines
+
+
+# cv2.rotate code and locate() orient for a photo turned by `rotate` degrees
+# clockwise: the camera rotated 90 deg on the rig. Turned clockwise, the rows
+# run right to left along frame x and the columns top to bottom along y.
+ROTATIONS = {0: (None, (False, False, False)),
+             90: ('ROTATE_90_CLOCKWISE', (True, True, False)),
+             270: ('ROTATE_90_COUNTERCLOCKWISE', (True, False, True))}
+
+
+def photos(json_path, outdir=None, rotate=0):
+    """Score the whole-grid pipeline on labelled photos of real layouts.
+
+    Each photo is rescaled so its cards are about 95 and 65 px wide as well as
+    left native (never enlarged: that would invent detail), with smooth (area)
+    and aliased (nearest) resampling -- the D8M's 4x sub-sampling sits between
+    the two. For every version: are all cards found at the right (row, col)?
+    Is each read right with the detected colour, and with the true one? Does the
+    pair report match the truth? Phone photos are sharper than the D8M, so
+    treat the numbers as optimistic. rotate=90/270 turns every photo first, so
+    the cards lie sideways the way the rotated camera sees them: that exercises
+    the window's transpose+flip and locate()'s orient."""
+    import cv2
+    import locate
+    rot_code, orient = ROTATIONS[rotate]
+    spec = json.load(open(json_path))
+    base = os.path.join(os.path.dirname(os.path.abspath(json_path)), spec.get('dir', '.'))
+    rows = {}                     # version -> counters
+    reds, blacks = [], []         # index red fractions by true colour
+    misses = {}
+    for name, grid in spec['photos'].items():
+        bgr0 = cv2.imread(os.path.join(base, name))
+        if bgr0 is None:
+            sys.exit(f'cannot read {os.path.join(base, name)}')
+        native = int(np.median([c.w for c in locate.locate(fabric_luma(bgr0).astype(np.uint8))]))
+        truth = {(r + 1, c + 1): parse_truth(code) + (code,)
+                 for r, line in enumerate(grid) for c, code in enumerate(line)}
+        want_pairs = pair_lines([(r, c, t[0], t[1], t[0] is None) for (r, c), t in truth.items()])
+        for target in (None, 95, 65):
+            s = 1.0 if target is None else target / native
+            if s > 1.05:
+                continue
+            for interp, tag in ((cv2.INTER_AREA, 'area'), (cv2.INTER_NEAREST, 'nearest')):
+                if target is None and tag == 'nearest':
+                    continue
+                bgr = bgr0 if target is None else cv2.resize(bgr0, None, fx=s, fy=s, interpolation=interp)
+                if rot_code:
+                    bgr = cv2.rotate(bgr, getattr(cv2, rot_code))
+                gray, red = fabric_luma(bgr), fabric_red(bgr)
+                reads = read_cards(gray, red, orient)
+                ver = f'{"native" if target is None else "~%dpx" % target} {tag}'
+                k = rows.setdefault(ver, dict(photos=0, grid=0, cards=0, ok=0, one=0, ok_true=0, colour=0, pairs=0))
+                k['photos'] += 1
+                k['grid'] += sorted((c.row, c.col) for c, *_ in reads) == sorted(truth)
+                got = []
+                for card, (r, su, score, j), rf, win, is_red, _nread, _agree, one in reads:
+                    t = truth.get((card.row, card.col))
+                    if t is None:
+                        continue
+                    t_rank, t_suit, t_red, code = t
+                    k['cards'] += 1
+                    (reds if t_red else blacks).append(rf)
+                    k['colour'] += is_red == bool(t_red)
+                    hit = (not j) and r == t_rank and su == t_suit
+                    k['ok'] += hit
+                    k['one'] += (not one[3]) and one[0] == t_rank and one[1] == t_suit
+                    if not hit:
+                        misses.setdefault(ver, []).append(
+                            f'{name[-13:-5]} ({card.row},{card.col}) {code}->{"JOKER" if j else r + su[0]}')
+                    if is_red != bool(t_red):
+                        rt, st, _, jt = infer(to_q(win), t_red)
+                        k['ok_true'] += (not jt) and rt == t_rank and st == t_suit
+                    else:
+                        k['ok_true'] += hit
+                    got.append((card.row, card.col, r, su, j))
+                k['pairs'] += pair_lines(got) == want_pairs
+                if outdir:
+                    os.makedirs(outdir, exist_ok=True)
+                    from PIL import Image
+                    sheet = Image.new('L', (3 * 192, 3 * 192))
+                    for card, _res, _rf, win, *_ in reads:
+                        if 1 <= card.row <= 3 and 1 <= card.col <= 3:
+                            tile = Image.fromarray(win.astype(np.uint8)).resize((192, 192), Image.NEAREST)
+                            sheet.paste(tile, ((card.col - 1) * 192, (card.row - 1) * 192))
+                    sheet.save(os.path.join(outdir, f'{name[-13:-5].replace(".", "")}_{ver.replace(" ", "_").replace("~", "")}.png'))
+                print(f'{name[-13:-5]}  {ver:<14} cards {len(reads)}  '
+                      + '  '.join(f'({c.row},{c.col}){"J" if res[3] else res[0] + res[1][0]}'
+                                  for c, res, *_ in reads), flush=True)
+        print('   truth pairs:', ' | '.join(want_pairs))
+
+    print(f'\n{"version":<16}{"grid ok":>9}{"cards":>7}{"1 read":>9}{"voted":>11}{"(true colour)":>15}'
+          f'{"colour ok":>11}{"pairs ok":>10}')
+    tot = dict(cards=0, one=0, ok=0)
+    for ver, k in rows.items():
+        n = max(k['cards'], 1)
+        for key in tot:
+            tot[key] += k[key]
+        print(f'{ver:<16}{k["grid"]:>4}/{k["photos"]:<4}{k["cards"]:>7}{k["one"]:>9}'
+              f'{k["ok"]:>5} {100 * k["ok"] / n:3.0f}%{k["ok_true"]:>9} {100 * k["ok_true"] / n:3.0f}%'
+              f'{k["colour"]:>7}/{k["cards"]:<3}{k["pairs"]:>6}/{k["photos"]}')
+    print(f'{"all":<16}{"":>9}{tot["cards"]:>7}{tot["one"]:>9}{tot["ok"]:>5}   '
+          f'(voted: {SCAN_READS} reads per card, duplicates {len(VARIANTS)})')
+    if reds and blacks:
+        print(f'\nindex red fraction: red cards {min(reds):.3f}-{max(reds):.3f}, '
+              f'black cards {min(blacks):.3f}-{max(blacks):.3f}  (red when > 1/{locate.RED_PER})')
+    for ver, m in misses.items():
+        print(f'misses, {ver}: ' + '; '.join(m))
 
 
 def write_png(p, path):
@@ -504,7 +855,35 @@ if __name__ == '__main__':
     ap.add_argument('--framing', metavar='DIR',
                     help='aim-tolerance sweep: the <rank><suit>/ folder\'s cards cut off-aim, '
                          'off-distance and on dark/light backgrounds (FRAMING_ROWS), rank+suit per row')
+    ap.add_argument('--photos', metavar='JSON',
+                    help='whole-grid scan on labelled photos of real layouts (photos_3x3.json): '
+                         'card finding, (row, col), reads and pairs at several card sizes')
+    ap.add_argument('--outdir', metavar='DIR',
+                    help='with --photos: write each version\'s 3x3 sheet of CNN windows here')
+    ap.add_argument('--rotate', type=int, choices=sorted(ROTATIONS), default=0,
+                    help='with --photos: turn each photo this many degrees clockwise first, as the '
+                         'rotated camera sees the table')
+    ap.add_argument('--scan', metavar='DUMP',
+                    help='replay every board grid scan in a file of SW1 whole-frame dumps (maxval 1023): '
+                         'one paste or a whole PuTTY log')
+    ap.add_argument('--frames', metavar='LOG',
+                    help='every frame dump in a file (a paste or a whole PuTTY log) -> <file>_<n>.png, '
+                         'red-test bits tinted red, plus one exposure line each')
+    ap.add_argument('--orient', type=int, default=0, choices=range(len(SCAN_ORIENTS)),
+                    help='with --scan: the board\'s orientation (UART o): 0 upright, 1 cam CW, 2 cam CCW, 3 cam 180')
     a = ap.parse_args()
+
+    if a.frames:
+        frames(a.frames)
+        sys.exit(0)
+
+    if a.scan:
+        scan(a.scan, a.orient)
+        sys.exit(0)
+
+    if a.photos:
+        photos(a.photos, a.outdir, a.rotate)
+        sys.exit(0)
 
     if a.selftest or a.selftest_dir:
         selftest(a.selftest_dir)
@@ -535,6 +914,11 @@ if __name__ == '__main__':
 
     print(f'{path}: {p.shape[1]}x{p.shape[0]}, '
           f'raw 8-bit min {p.min()} max {p.max()}')
+    if p.shape == (384, 512):
+        # a whole-frame dump (29 Sep bitstream): what guided mode's default
+        # window reads, the old centred crop at 1:1
+        p = window_map(p, 64, 0, 256)
+        print('  512x384 frame dump: using the default window (frame x 64..447)')
     if zoom and tuple(zoom) != full:
         print(f'  zoom x={zoom[0]} y={zoom[1]} w={zoom[2]} h={zoom[3]}')
         p = apply_zoom(p, zoom)

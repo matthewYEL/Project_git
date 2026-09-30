@@ -56,6 +56,7 @@ struct amp_job
     volatile uint32_t    done;          /* set to req by CPU1 when res is valid */
     uint32_t             reserved[ 6 ]; /* pad the head to one 32-byte line     */
 
+    struct vision_job    cmd __attribute__( ( aligned( 32 ) ) );   /* CPU0 writes before req */
     struct vision_result res __attribute__( ( aligned( 32 ) ) );   /* CPU1 writes */
 };
 

@@ -37,10 +37,10 @@
  * global-timer counter the wait is timed on. */
 #define CORE1_JOB_TIMEOUT_US    12000000UL
 
-/* Print the FreeRTOS run-time task statistics every N results (and on any
- * press with SW2 up). This is the scheduling evidence: per-task CPU0 time
- * straight out of the kernel, plus CPU1's job count and busy time. 0 = only
- * on SW2. */
+/* Print the FreeRTOS run-time task statistics every N results. This is the
+ * scheduling evidence: per-task CPU0 time straight out of the kernel, plus
+ * CPU1's job count and busy time. 0 = never. (SW2 used to print them on
+ * demand; since 29 Sep it shows the 3x3 guide grid on HDMI.) */
 #define STATS_EVERY 5
 
 /* SW3 up: start a job automatically this often (measured from the previous
@@ -52,6 +52,20 @@
 /* KEY1 held this long clears the HDMI tracker; a shorter press undoes the
  * newest card only. */
 #define KEY1_CLEAR_MS   2000u
+
+/* Whole-grid scan (M2 demo, 29 Sep): UART m toggles whether KEY0 scans the
+ * whole grid or reads one card at the green box, UART s scans whatever the
+ * mode. SCAN_ORIENT_DEFAULT indexes app_rtos.c's ORIENTS[]: 0 upright camera,
+ * 1 turned clockwise, 2 anticlockwise, 3 upside down -- set it from the rig
+ * (UART o cycles it at run time). */
+#define SCAN_AUTO_DEFAULT       0
+#define SCAN_ORIENT_DEFAULT     0
+
+/* Reads per card in a grid scan (1, 3 or 5): each through a slightly different
+ * window (turned, shifted, zoomed), majority vote. No time limit in the demo,
+ * so 5: ~1.7 s each, ~77 s for a 3x3. On the 28 Sep photos, 243 card reads:
+ * 1 read 237 right, 5 reads 241. app_rtos.c VARIANTS. */
+#define SCAN_READS              5
 
 int rtos_main( void );
 

@@ -26,6 +26,7 @@ const char * const SUIT_NAMES[ 4 ]  = { "Spades", "Clubs", "Hearts", "Diamonds" 
 
 #define CELLS 2400
 static uint16_t ram[ CELLS ];
+static uint16_t win_reg[ 8 ];           /* ghrd_top.v's window registers, 0xE00 + n */
 static uint32_t pio_data, pio_addr;
 static unsigned n_writes;
 
@@ -35,10 +36,16 @@ void alt_write_word( uint32_t addr, uint32_t value )
     else if( addr == 0xFF200020u ) pio_addr = value & 0x3FFFu;
     else assert( !"the GUI wrote a register other than img_wr_data / img_wr_addr" );
     n_writes++;
-    /* the RAM writes on every clk50 while the enable is up */
+    /* the RAM writes on every clk50 while the enable is up; 0xE00 up is the
+     * window registers, and the text RAM only takes cells below 2400 */
     if( pio_addr & 0x2000u ) {
-        assert( ( pio_addr & 0xFFFu ) < CELLS );
-        ram[ pio_addr & 0xFFFu ] = ( uint16_t ) pio_data;
+        unsigned a = pio_addr & 0xFFFu;
+
+        if( ( a & 0xF00u ) == 0xE00u ) win_reg[ a & 7u ] = ( uint16_t ) pio_data;
+        else {
+            assert( a < CELLS );
+            ram[ a ] = ( uint16_t ) pio_data;
+        }
     }
 }
 
@@ -325,6 +332,87 @@ int main( int argc, char ** argv )
     EXPECT( 0, "NOTHING TO UNDO" );
     assert( !gui_command( "zz" ) && !gui_command( "e5" ) && !gui_command( "9" ) );
     PREVIEW_BLANK();
+
+    /* ---- whole-grid scan: the 28 Sep photo layout, then a 4th row added ---- */
+    {
+        static const struct { unsigned rank, suit; } LAY[ 12 ] = {
+            { R7, HEARTS },   { RQ, CLUBS },    { 0, SPADES },       /* 7H QC 2S */
+            { RA, DIAMONDS }, { R7, DIAMONDS }, { R3, CLUBS },       /* AD 7D 3C */
+            { RK, HEARTS },   { 9, SPADES },    { RA, HEARTS },      /* KH JS AH */
+            { R3, DIAMONDS }, { 7, SPADES },    { 0, HEARTS },       /* 3D 9S 2H: the added row */
+        };
+        struct scan_result s;
+        struct win_regs    w = { -37, 5, 94, WIN_T | WIN_FY, { 10, 20, 300, 200 } };
+        unsigned           k;
+
+        win_write( &w );                                     /* the registers, not the text RAM */
+        assert( win_reg[ 0 ] == ( ( unsigned ) -37 & 0x7FFu ) && win_reg[ 1 ] == 5 && win_reg[ 2 ] == 94 &&
+                win_reg[ 3 ] == ( WIN_T | WIN_FY ) && win_reg[ 4 ] == 10 && win_reg[ 5 ] == 20 &&
+                win_reg[ 6 ] == 300 && win_reg[ 7 ] == 200 );
+
+        memset( &s, 0, sizeof s );
+        s.n = 9;
+        s.nrows = s.ncols = 3;
+        for( k = 0; k < 12; k++ ) {
+            s.card[ k ].row = ( uint8_t ) ( k / 3 + 1 );
+            s.card[ k ].col = ( uint8_t ) ( k % 3 + 1 );
+        }
+        gui_scan_begin( &s );
+        EXPECT( 0, "SCANNING 9 CARDS" );
+        EXPECT( 1, "GRID SCAN 3 x 3" );
+        for( k = 0; k < 9; k++ ) {
+            v = card( LAY[ k ].rank, LAY[ k ].suit, 0, 900 );
+            gui_scan_card( s.card[ k ].row, s.card[ k ].col, v.result, 100 + k );
+        }
+        gui_scan_done();
+        EXPECT( 0, "SCAN DONE - 2 PAIRS" );
+        EXPECT( 19, "GRID SCAN - 9 CARDS, 2 PAIRS" );
+        EXPECT( 22, " 1 7  (1,1)+(2,2)" );
+        EXPECT( 23, " 2 A  (2,1)+(3,3)" );
+        EXPECT( 28, "last: A of Hearts -> (3,3)" );
+        PREVIEW_BLANK();
+        dump( argc > 4 ? argv[ 4 ] : NULL );
+
+        s.n = 12;                                            /* the professor adds a row */
+        s.nrows = 4;
+        gui_scan_begin( &s );
+        for( k = 0; k < 12; k++ ) {
+            v = card( LAY[ k ].rank, LAY[ k ].suit, 0, 900 );
+            gui_scan_card( s.card[ k ].row, s.card[ k ].col, v.result, 200 + k );
+        }
+        gui_scan_done();
+        EXPECT( 0, "SCAN DONE - 4 PAIRS" );
+        EXPECT( 1, "GRID SCAN 4 x 3" );
+        EXPECT( 24, " 3 3  (2,3)+(4,1)" );
+        EXPECT( 25, " 4 2  (1,3)+(4,3)" );
+        gui_scan_card( 9, 9, v.result, 300 );                 /* off the board: ignored */
+        gui_scan_card( 2, 2, 0, 301 );                       /* no result: status only */
+        EXPECT( 0, "NO READ AT (2,2)" );
+        PREVIEW_BLANK();
+        dump( argc > 5 ? argv[ 5 ] : NULL );
+        assert( gui_command( "3" ) );                        /* a guided board: letters again */
+        EXPECT( 1, "FACE-UP 3x3" );
+
+        gui_mode( 1, "cam CW" );                             /* AUTO: frame guides over the preview */
+        EXPECT( 18, "AUTO: grid inside the lines (cam CW)" );
+        assert( count_ch( 4, 5, 11, 1, 0xB3 ) == 11 && count_ch( 4, 36, 11, 1, 0xB3 ) == 11 );
+        assert( count_ch( 2, 1, 15, 40, ' ' ) == 15u * 40u - 22u );
+        gui_mode( 0, "cam CW" );                             /* guided again: the preview clear */
+        EXPECT( 18, "fit the whole card in the green box" );
+        PREVIEW_BLANK();
+
+        gui_guide_grid( 1 );                                 /* SW2 up: 3x3 in the green box */
+        assert( ch_at( 7, 9 ) == 0xC4 && ch_at( 7, 32 ) == 0xC4 && ch_at( 11, 20 ) == 0xC4 );
+        assert( ch_at( 7, 17 ) == 0xC5 && ch_at( 11, 25 ) == 0xC5 );
+        assert( ch_at( 3, 17 ) == 0xC2 && ch_at( 3, 25 ) == 0xC2 );
+        assert( ch_at( 15, 17 ) == 0xC1 && ch_at( 15, 25 ) == 0xC1 );
+        assert( ch_at( 5, 17 ) == 0xB3 && ch_at( 13, 25 ) == 0xB3 );
+        assert( ch_at( 7, 8 ) == ' ' && ch_at( 7, 33 ) == ' ' && ch_at( 2, 17 ) == ' ' && ch_at( 16, 25 ) == ' ' );
+        assert( fg_at( 7, 9 ) == GUI_LGREEN );
+        dump( argc > 6 ? argv[ 6 ] : NULL );
+        gui_guide_grid( 0 );                                 /* SW2 down: gone */
+        PREVIEW_BLANK();
+    }
 
     printf( "screen at the end (%u PIO writes):\n", n_writes );
     for( i = 0; i < 30; i++ ) printf( "  %2d |%s|\n", i, row_text( i ) );

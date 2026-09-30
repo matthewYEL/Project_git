@@ -117,9 +117,12 @@ static void ampCore1Main( void )
             continue;
         }
 
-        /* The real work: exactly the code the single-core build runs. */
+        /* The real work: exactly the code the single-core build runs. The
+         * command CPU0 wrote before bumping req: a guided read (VJOB_FULL)
+         * or one step of a grid scan. */
+        ampCacheInvalidate( &pxJob->cmd, sizeof( pxJob->cmd ) );
         ulStart = ulGlobalTimerNow();
-        vision_run( &pxJob->res );
+        vision_do( &pxJob->cmd, &pxJob->res );
         ulUs = ulGlobalTimerToUs( ulGlobalTimerNow() - ulStart );
 
         pxShared->core1_busy_us += ulUs;

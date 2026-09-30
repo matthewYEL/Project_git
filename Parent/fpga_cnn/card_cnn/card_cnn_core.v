@@ -1,7 +1,9 @@
 // ---------------------------------------------------------------------------
 // card_cnn_core.v  --  top-level card recognition CNN
 //
-//   image 384x384         147,456 words  (written by the camera capture path)
+//   frame 512x384         196,608 words  (written by the camera capture path)
+//     -> conv1 reads a window of it as 384x384 (the default window: the
+//        centred 384x384 crop, 1:1; in a grid scan: one card, scaled)
 //     -> conv1  C filt 5x5 pad2 -> ReLU -> pool 4x4 ->  C x 96x96
 //     -> conv2 16 filt 5x5 pad2 -> ReLU -> pool 2x2 -> 16 x 48x48   36,864
 //     -> conv3 16 filt 5x5 pad2 -> ReLU -> pool 2x2 -> 16 x 24x24    9,216
@@ -31,7 +33,8 @@
 //
 // Each conv writes POOLED output directly (conv_layer's POOL parameter). The
 // separate maxpool_layer is not instantiated; maxpool_layer.v stays in the
-// project regardless because ram_dp and ram_dp_dc are defined at its bottom.
+// project regardless because ram_dp is defined at its bottom. (ram_dp_dc
+// beside it is unused since the image RAM became an explicit altsyncram.)
 //
 // MEMORY ALIASING. p3 and p4 share u_act1 with p1 rather than getting RAMs of
 // their own. p1 is dead the moment conv2 finishes, and conv3/conv4 run strictly
@@ -73,7 +76,14 @@ module card_cnn_core #(
     parameter [29:0] FCS_W_WORD_BASE = 30'h0400_0000,
     // fc_shared's weights are Q1.14, not Q6.10 -- export_weights_rtl.py
     // FCS_W_FRAC, recorded as "fcs_w_frac" in weights_manifest.json.
-    parameter FCS_W_FRAC = 14
+    parameter FCS_W_FRAC = 14,
+    // The stored camera frame (M2 whole-grid scan). capture_384.v writes a
+    // FRAME_W x FRAME_H grey frame at {row, col}; conv1 reads a window of it
+    // through its window mapper (conv_layer.v WIN_MAP), one card per
+    // inference. The default window is the old centred 384x384 crop 1:1, so
+    // guided mode reads exactly what it did before.
+    parameter FRAME_W = 512,
+    parameter FRAME_H = 384
 )(
     input  wire         clk,
     input  wire         rst,
@@ -95,6 +105,17 @@ module card_cnn_core #(
     // colour flag: 1 = red, 0 = black
     input  wire         colour_flag,
 
+    // conv1's window into the frame (conv_layer.v WIN_MAP); latched by the
+    // caller for the whole inference
+    input  wire signed [10:0] win_x0,
+    input  wire signed [10:0] win_y0,
+    input  wire        [8:0]  win_step,
+    input  wire        [2:0]  win_flags,
+    input  wire        [9:0]  clip_x0,
+    input  wire        [9:0]  clip_y0,
+    input  wire        [9:0]  clip_x1,
+    input  wire        [9:0]  clip_y1,
+
     // HPS f2h_sdram0 port (Avalon-MM, 32-bit, word-addressed), used only to
     // fetch fc_shared's weights. Same clock as the core (clk_0, 50 MHz).
     output wire [29:0]  avm_address,
@@ -115,8 +136,8 @@ module card_cnn_core #(
     output reg          done
 );
     // ---- geometry ----------------------------------------------------------
-    localparam IMG_DIM   = 384;
-    localparam IMG_WORDS = IMG_DIM * IMG_DIM;          // 147,456
+    localparam IMG_DIM   = 384;                        // conv1's (virtual) input
+    localparam IMG_WORDS = FRAME_W * FRAME_H;          // 196,608: the stored frame
     localparam P1_WORDS  = CONV1_CH * 96 * 96;
     localparam P2_WORDS  = 16 * 48 * 48;               // 36,864
     localparam P3_WORDS  = 16 * 24 * 24;               //  9,216
@@ -138,17 +159,54 @@ module card_cnn_core #(
     wire [IMG_DW-1:0] img_rd_data;
     wire [17:0] img_rd_addr_mux = img_dbg_en ? img_dbg_addr : img_rd_addr;
 
-    ram_dp_dc #(.AW(18), .DW(IMG_DW), .DEPTH(IMG_WORDS)) u_img (
-        .wr_clk(img_wr_clk), .wr_en(img_wr_en),
-        .wr_addr(img_wr_addr), .wr_data(img_wr_data),
-        .rd_clk(clk), .rd_addr(img_rd_addr_mux), .rd_data(img_rd_data));
+    // The frame word is {gray[7:0], 1'b0, is_red} (capture_384.v): the red bit
+    // rides in the two LSBs that were always zero, so it costs no M10K (a
+    // block holds 1,024 words at x8 and at x10 alike) and lets the host count
+    // red pixels per card. That needs all 10 bits: IMG_DW must be 10.
+    generate if (IMG_DW != 10) begin : img_dw_must_be_10
+        IMG_DW_must_be_10_with_the_frame_red_bit u_stop ();
+    end endgenerate
+
+    // Explicit altsyncram, like text_overlay.v and FRAM_BUFF.v: with the M10K
+    // this full, synthesis ran out of RAM-inference budget once (Warning
+    // 276002) and built an inferred RAM from flip-flops. Address registered on
+    // the read clock, output not: the one-clock read ram_dp_dc had.
+    altsyncram u_img (
+        .clock0 (img_wr_clk), .wren_a (img_wr_en), .address_a (img_wr_addr), .data_a (img_wr_data),
+        .clock1 (clk), .address_b (img_rd_addr_mux), .q_b (img_rd_data),
+        .aclr0 (1'b0), .aclr1 (1'b0), .addressstall_a (1'b0), .addressstall_b (1'b0),
+        .byteena_a (1'b1), .byteena_b (1'b1),
+        .clocken0 (1'b1), .clocken1 (1'b1), .clocken2 (1'b1), .clocken3 (1'b1),
+        .data_b ({IMG_DW{1'b1}}), .eccstatus (), .q_a (),
+        .rden_a (1'b1), .rden_b (1'b1), .wren_b (1'b0)
+    );
+    defparam
+        u_img.operation_mode                     = "DUAL_PORT",
+        u_img.width_a                            = IMG_DW,
+        u_img.widthad_a                          = 18,
+        u_img.numwords_a                         = IMG_WORDS,
+        u_img.width_b                            = IMG_DW,
+        u_img.widthad_b                          = 18,
+        u_img.numwords_b                         = IMG_WORDS,
+        u_img.width_byteena_a                    = 1,
+        u_img.address_reg_b                      = "CLOCK1",
+        u_img.outdata_reg_b                      = "UNREGISTERED",
+        u_img.address_aclr_b                     = "NONE",
+        u_img.outdata_aclr_b                     = "NONE",
+        u_img.clock_enable_input_a               = "BYPASS",
+        u_img.clock_enable_input_b               = "BYPASS",
+        u_img.clock_enable_output_b              = "BYPASS",
+        u_img.read_during_write_mode_mixed_ports = "DONT_CARE",
+        u_img.ram_block_type                     = "M10K",
+        u_img.maximum_depth                      = 1024,
+        u_img.power_up_uninitialized             = "FALSE",
+        u_img.intended_device_family             = "Cyclone V",
+        u_img.lpm_type                           = "altsyncram";
 
     assign img_dbg_data = img_rd_data;
 
-    // Expand the stored pixel to Q6.10. The capture path stores gray*4 with
-    // (10 - IMG_DW) low bits dropped, so shifting back up is exact.
-    wire signed [15:0] img_rd_q = $signed({{(16-10){1'b0}},
-                                           img_rd_data, {(10-IMG_DW){1'b0}}});
+    // Expand the stored pixel to Q6.10: gray*4, with the red bit masked off.
+    wire signed [15:0] img_rd_q = $signed({6'b0, img_rd_data[9:2], 2'b00});
 
     // ---- activation buffers ------------------------------------------------
     // DEPTH = exact activation size; the default 2^AW depth would waste blocks.
@@ -210,31 +268,40 @@ module card_cnn_core #(
 
     conv_layer #(.IN_CH(1), .OUT_CH(CONV1_CH), .DIM(384), .POOL(4),
                  .IN_AW(18), .OUT_AW(ACT1_AW),
+                 .WIN_MAP(1), .FRAME_W(FRAME_W), .FRAME_H(FRAME_H),
                  .WFILE("conv1_w.hex"), .BFILE("conv1_b.hex"))
     u_conv1 (.clk(clk), .rst(rst), .start(start_c1), .done(p1_done),
              .in_rd_addr(img_rd_addr), .in_rd_data(img_rd_q),
-             .out_wr_addr(p1_wr_addr), .out_wr_data(p1_wr_data), .out_wr_en(p1_wr_en));
+             .out_wr_addr(p1_wr_addr), .out_wr_data(p1_wr_data), .out_wr_en(p1_wr_en),
+             .win_x0(win_x0), .win_y0(win_y0), .win_step(win_step), .win_flags(win_flags),
+             .clip_x0(clip_x0), .clip_y0(clip_y0), .clip_x1(clip_x1), .clip_y1(clip_y1));
 
     conv_layer #(.IN_CH(CONV1_CH), .OUT_CH(16), .DIM(96), .POOL(2),
                  .IN_AW(ACT1_AW), .OUT_AW(16),
                  .WFILE("conv2_w.hex"), .BFILE("conv2_b.hex"))
     u_conv2 (.clk(clk), .rst(rst), .start(p1_done), .done(p2_done),
              .in_rd_addr(p1_rd_addr), .in_rd_data(act1_rd_data),
-             .out_wr_addr(p2_wr_addr), .out_wr_data(p2_wr_data), .out_wr_en(p2_wr_en));
+             .out_wr_addr(p2_wr_addr), .out_wr_data(p2_wr_data), .out_wr_en(p2_wr_en),
+             .win_x0(11'sd0), .win_y0(11'sd0), .win_step(9'd0), .win_flags(3'd0),
+             .clip_x0(10'd0), .clip_y0(10'd0), .clip_x1(10'd0), .clip_y1(10'd0));
 
     conv_layer #(.IN_CH(16), .OUT_CH(16), .DIM(48), .POOL(2),
                  .IN_AW(16), .OUT_AW(14), .W_BITS(CONV3_W_BITS),
                  .WFILE("conv3_w.hex"), .BFILE("conv3_b.hex"))
     u_conv3 (.clk(clk), .rst(rst), .start(p2_done), .done(p3_done),
              .in_rd_addr(p2_rd_addr), .in_rd_data(p2_rd_data),
-             .out_wr_addr(p3_wr_addr), .out_wr_data(p3_wr_data), .out_wr_en(p3_wr_en));
+             .out_wr_addr(p3_wr_addr), .out_wr_data(p3_wr_data), .out_wr_en(p3_wr_en),
+             .win_x0(11'sd0), .win_y0(11'sd0), .win_step(9'd0), .win_flags(3'd0),
+             .clip_x0(10'd0), .clip_y0(10'd0), .clip_x1(10'd0), .clip_y1(10'd0));
 
     conv_layer #(.IN_CH(16), .OUT_CH(16), .DIM(24), .POOL(2),
                  .IN_AW(14), .OUT_AW(12), .W_BITS(CONV4_W_BITS),
                  .WFILE("conv4_w.hex"), .BFILE("conv4_b.hex"))
     u_conv4 (.clk(clk), .rst(rst), .start(p3_done), .done(p4_done),
              .in_rd_addr(p3_rd_addr), .in_rd_data(act1_rd_data),
-             .out_wr_addr(p4_wr_addr), .out_wr_data(p4_wr_data), .out_wr_en(p4_wr_en));
+             .out_wr_addr(p4_wr_addr), .out_wr_data(p4_wr_data), .out_wr_en(p4_wr_en),
+             .win_x0(11'sd0), .win_y0(11'sd0), .win_step(9'd0), .win_flags(3'd0),
+             .clip_x0(10'd0), .clip_y0(10'd0), .clip_x1(10'd0), .clip_y1(10'd0));
 
     always @(posedge clk or posedge rst) begin
         if (rst) begin

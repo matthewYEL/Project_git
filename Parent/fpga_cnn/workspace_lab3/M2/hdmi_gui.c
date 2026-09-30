@@ -40,6 +40,21 @@ void alt_write_word( uint32_t addr, uint32_t value );   /* gui_host_test.c emula
 #include "socal.h"
 #endif
 
+/* The bus is shared by two CPU0 tasks since the grid scan: Report draws text,
+ * Vision writes conv1's window registers. Each write is three PIO accesses
+ * that must not interleave, so hold off task switches across them (the
+ * scheduler lock, not a critical section: no ISR touches the bus, and it is
+ * safe before the scheduler starts, which gui_init runs). */
+#if RTOS_MODE && !defined( GUI_HOST )
+#include "FreeRTOS.h"
+#include "task.h"
+#define BUS_LOCK()      vTaskSuspendAll()
+#define BUS_UNLOCK()    ( void ) xTaskResumeAll()
+#else
+#define BUS_LOCK()
+#define BUS_UNLOCK()
+#endif
+
 #define TXT_DATA_PIO_BASE   0xFF200010u     /* img_wr_data */
 #define TXT_ADDR_PIO_BASE   0xFF200020u     /* img_wr_addr */
 #define TXT_WE              0x2000u         /* img_wr_addr[13] */
@@ -113,17 +128,50 @@ struct det                          /* the latest read, for the INFO panel */
 static struct det last;
 static int        last_valid;
 
+/* The board came from an automatic grid scan: cells are named by the
+ * professor's (row, col) -- "(2,1)" -- instead of the guided scan's "A2" --
+ * and the title gives the rows x columns found (a 4x3 is drawn on a 4x4). */
+static int s_auto;
+static int s_rows, s_cols;
+
+static void cell_label( int i, char * buf, unsigned n )
+{
+    if( s_auto ) snprintf( buf, n, "(%d,%d)", i / g.n + 1, i % g.n + 1 );
+    else {
+        char name[ 3 ];
+        grid_cell_name( &g, i, name );
+        snprintf( buf, n, "%s", name );
+    }
+}
+
 /* ---- drawing primitives ------------------------------------------------- */
+
+/* one word on the text-layer bus: data, then the address with the enable, then
+ * without it */
+static void bus_write( unsigned a, unsigned data )
+{
+    BUS_LOCK();
+    alt_write_word( TXT_DATA_PIO_BASE, data & 0xFFFFu );
+    alt_write_word( TXT_ADDR_PIO_BASE, TXT_WE | a );
+    alt_write_word( TXT_ADDR_PIO_BASE, a );
+    BUS_UNLOCK();
+}
 
 static void put( int row, int col, unsigned ch, unsigned fg, unsigned bg )
 {
-    unsigned a;
-
     if( row < 0 || row >= ROWS || col < 0 || col >= COLS ) return;
-    a = ( unsigned ) ( row * COLS + col );
-    alt_write_word( TXT_DATA_PIO_BASE, ( bg << 12 ) | ( fg << 8 ) | ( ch & 0xFFu ) );
-    alt_write_word( TXT_ADDR_PIO_BASE, TXT_WE | a );
-    alt_write_word( TXT_ADDR_PIO_BASE, a );
+    bus_write( ( unsigned ) ( row * COLS + col ), ( bg << 12 ) | ( fg << 8 ) | ( ch & 0xFFu ) );
+}
+
+void win_write( const struct win_regs * w )
+{
+    const unsigned v[ 8 ] = {
+        ( unsigned ) w->x0 & 0x7FFu, ( unsigned ) w->y0 & 0x7FFu, w->step, w->flags,
+        w->clip[ 0 ], w->clip[ 1 ], w->clip[ 2 ], w->clip[ 3 ]
+    };
+    unsigned k;
+
+    for( k = 0; k < 8; k++ ) bus_write( WIN_REG_BASE + k, v[ k ] );
 }
 
 /* `s` from (row, col), padded with spaces to `w` cells (w = 0: no padding, no
@@ -270,10 +318,11 @@ static void draw_cell( int i )
 {
     const struct grid_cell * c = &g.cell[ i ];
     int k = g.n - 3, w = GEO[ k ].w, h = GEO[ k ].h, row, col;
-    char name[ 3 ];
+    char name[ 8 ];
 
+    if( s_auto && ( i / g.n >= s_rows || i % g.n >= s_cols ) ) return;   /* not in the scanned grid */
     cell_pos( i, &row, &col );
-    grid_cell_name( &g, i, name );
+    cell_label( i, name, sizeof name );
     switch( c->state ) {
     case CELL_EMPTY:   card_slot( row, col, h, w, name, i == g.target ? BRASS : GUI_LGREEN ); break;
     case CELL_DOWN:    card_back( row, col, h, w, i == g.target ? BRASS : GUI_BLUE );         break;
@@ -292,13 +341,16 @@ static void draw_board( void )
     fill( GRID_ROW, GRID_COL, ROWS - 2, COLS - 1 - GRID_COL, ' ', INK, FELT );
     put( 1, COLS - 2, CH_LOWER, FELT, WOOD );           /* the felt's rounded corners */
     put( ROWS - 2, COLS - 2, CH_UPPER, FELT, WOOD );
-    snprintf( buf, sizeof buf, " %s %dx%d ", g.mode == GRID_SCAN ? "FACE-UP" : "FACE-DOWN GAME", g.n, g.n );
+    if( s_auto ) snprintf( buf, sizeof buf, " GRID SCAN %d x %d ", s_rows, s_cols );
+    else         snprintf( buf, sizeof buf, " %s %dx%d ", g.mode == GRID_SCAN ? "FACE-UP" : "FACE-DOWN GAME", g.n, g.n );
     text( GRID_ROW, GRID_COL + 1, 0, buf, GUI_BLACK, BRASS );
     for( i = 0; i < g.n; i++ ) {
         cell_pos( i, &row, &col );                      /* top row: the column letters */
-        put( row - 1, col + GEO[ g.n - 3 ].w / 2, ( unsigned ) ( 'A' + i ), INK, FELT );
+        if( !s_auto || i < s_cols )
+            put( row - 1, col + GEO[ g.n - 3 ].w / 2, ( unsigned ) ( ( s_auto ? '1' : 'A' ) + i ), INK, FELT );
         cell_pos( i * g.n, &row, &col );                /* left column: the row numbers */
-        put( row + ( GEO[ g.n - 3 ].h - 1 ) / 2, col - 2, ( unsigned ) ( '1' + i ), INK, FELT );
+        if( !s_auto || i < s_rows )
+            put( row + ( GEO[ g.n - 3 ].h - 1 ) / 2, col - 2, ( unsigned ) ( '1' + i ), INK, FELT );
     }
     for( i = 0; i < g.n * g.n; i++ ) draw_cell( i );
 }
@@ -307,12 +359,16 @@ static void draw_board( void )
 
 static void draw_info( void )
 {
-    char buf[ 48 ], a[ 3 ], b[ 3 ];
+    char buf[ 48 ], a[ 8 ], b[ 8 ];
     int  i, k, row = INFO_ROW + 2, cells = g.n * g.n;
 
     /* the prompt: what the operator does next */
-    if( g.mode == GRID_SCAN ) {
-        grid_cell_name( &g, g.target < 0 ? 0 : g.target, a );
+    if( g.mode == GRID_SCAN && s_auto ) {
+        snprintf( buf, sizeof buf, " GRID SCAN - %u CARD%s, %u PAIR%s", g.n_read, g.n_read == 1 ? "" : "S",
+                  g.pairs, g.pairs == 1 ? "" : "S" );
+    }
+    else if( g.mode == GRID_SCAN ) {
+        cell_label( g.target < 0 ? 0 : g.target, a, sizeof a );
         if( g.target >= 0 ) snprintf( buf, sizeof buf, " NEXT: %s - show it at the box, KEY0", a );
         else                snprintf( buf, sizeof buf, " SCAN DONE - %u PAIR%s FOUND", g.pairs, g.pairs == 1 ? "" : "S" );
     }
@@ -329,7 +385,7 @@ static void draw_info( void )
     fill( INFO_ROW + 1, INFO_COL, 8, INFO_W, ' ', INK, FELT );
 
     if( g.mode == GRID_SCAN ) {
-        snprintf( buf, sizeof buf, "READ %u/%d    PAIRS %u", g.n_read, cells, g.pairs );
+        snprintf( buf, sizeof buf, "READ %u/%d    PAIRS %u", g.n_read, s_auto ? s_rows * s_cols : cells, g.pairs );
         text( row++, INFO_COL, INFO_W, buf, INK, FELT );
         /* the pairs, two columns of six: "3  7  A1+C3" */
         for( k = 1; k <= g.pairs && k <= 12; k++ ) {
@@ -338,8 +394,8 @@ static void draw_info( void )
             for( i = 0; i < cells; i++ ) {
                 if( g.cell[ i ].pair != k ) continue;
                 if( first < 0 ) { first = i; continue; }
-                grid_cell_name( &g, first, a );
-                grid_cell_name( &g, i, b );
+                cell_label( first, a, sizeof a );
+                cell_label( i, b, sizeof b );
                 snprintf( buf, sizeof buf, "%2d %-2s %s+%s", k, short_rank( g.cell[ i ].result ), a, b );
                 text( row + ( k - 1 ) % 6, INFO_COL + ( k - 1 ) / 6 * 20, 19, buf, GUI_BLACK, BRASS );
                 break;
@@ -367,7 +423,7 @@ static void draw_info( void )
     if( last_valid ) {
         char name[ 24 ];
 
-        if( last.placed >= 0 ) grid_cell_name( &g, last.placed, a );
+        if( last.placed >= 0 ) cell_label( last.placed, a, sizeof a );
         snprintf( buf, sizeof buf, "last: %s %s %s", card_name( last.result, name, sizeof name ),
                   last.placed >= 0 ? "->" : "", last.placed >= 0 ? a : "(not placed)" );
     }
@@ -411,7 +467,7 @@ void gui_init( void )
     static const struct { const char * key, * what; } HELP[] = {
         { "KEY0", "read" }, { "KEY1", "undo/hold:new" }, { "SW0", "ascii" }, { "SW1", "pgm" },
 #if RTOS_MODE
-        { "SW2", "stats" }, { "SW3", "auto" }, { "UART", "h" },
+        { "SW2", "3x3" }, { "SW3", "auto" }, { "UART", "h" },
 #endif
     };
     unsigned k;
@@ -530,14 +586,17 @@ int gui_command( const char * cmd )
     int  cell;
 
     if( cmd[ 0 ] >= '3' && cmd[ 0 ] <= '5' && !cmd[ 1 ] ) {         /* "4": face-up scan */
+        s_auto = 0;
         new_board( cmd[ 0 ] - '0', GRID_SCAN );
         return 1;
     }
     if( c0 == 'g' && cmd[ 1 ] >= '3' && cmd[ 1 ] <= '5' && !cmd[ 2 ] ) {   /* "g4": face-down game */
+        s_auto = 0;
         new_board( cmd[ 1 ] - '0', GRID_GAME );
         return 1;
     }
     if( c0 == 'r' && !cmd[ 1 ] ) {                                  /* restart this board */
+        s_auto = 0;
         new_board( g.n, g.mode );
         return 1;
     }
@@ -553,4 +612,122 @@ int gui_command( const char * cmd )
     snprintf( msg, sizeof msg, "NEXT: %s", name );
     gui_status( msg, GUI_LGREEN );
     return 1;
+}
+
+/* ---- whole-grid scan ---------------------------------------------------- */
+
+void gui_scan_begin( const struct scan_result * s )
+{
+    char msg[ 28 ];
+    int  n = ( int ) ( s->nrows > s->ncols ? s->nrows : s->ncols );
+
+    s_auto = 1;
+    s_rows = ( int ) s->nrows;
+    s_cols = ( int ) s->ncols;
+    new_board( n < 3 ? 3 : n > GRID_MAX ? GRID_MAX : n, GRID_SCAN );
+    g.target = -1;                          /* nothing to prompt: the scan places cards */
+    draw_info();
+    snprintf( msg, sizeof msg, "SCANNING %u CARD%s", ( unsigned ) s->n, s->n == 1 ? "" : "S" );
+    gui_status( msg, GUI_YELLOW );
+}
+
+void gui_scan_card( unsigned row, unsigned col, uint32_t result, unsigned shot )
+{
+    char msg[ 28 ], name[ 24 ];
+    int  cell;
+
+    if( !row || !col || row > g.n || col > g.n ) return;    /* off the drawable board */
+    cell = ( int ) ( ( row - 1 ) * g.n + ( col - 1 ) );
+    if( !RES_DONE( result ) || RES_DDR_ERR( result ) ||
+        ( !RES_JOKER( result ) && RES_RANK( result ) >= 13u ) ) {
+        snprintf( msg, sizeof msg, "NO READ AT (%u,%u)", row, col );
+        gui_status( msg, GUI_LRED );
+        return;
+    }
+    grid_target( &g, cell );                /* a filled cell is read again: a re-read replaces it */
+    grid_read( &g, result, shot );
+    g.target = -1;
+    last.result = result;
+    last.shot   = shot;
+    last.where  = NULL;
+    last.placed = cell;
+    last_valid  = 1;
+    redraw();
+    snprintf( msg, sizeof msg, "(%u,%u) %s", row, col, card_name( result, name, sizeof name ) );
+    gui_status( msg, GUI_YELLOW );
+}
+
+void gui_scan_done( void )
+{
+    char msg[ 28 ];
+
+    g.target = -1;
+    draw_info();
+    snprintf( msg, sizeof msg, "SCAN DONE - %u PAIR%s", g.pairs, g.pairs == 1 ? "" : "S" );
+    gui_status( msg, g.pairs >= 2 ? GUI_LGREEN : GUI_YELLOW );
+}
+
+/* The scan frame is the green box plus 64 camera px (32 preview px) each side,
+ * top and bottom the same as the box. In AUTO mode a thin line just inside
+ * each side edge (text columns 5 and 36 -- glyph pixels print over the video)
+ * shows where the whole grid must fit; a card cut by the frame edge is not
+ * counted. Off again in guided mode, where the preview must stay clear. */
+#define GUIDE_COL_L     5
+#define GUIDE_COL_R     36
+#define GUIDE_ROW_0     4
+#define GUIDE_ROW_1     14
+#define CH_VLINE        0xB3u
+
+void gui_mode( int auto_scan, const char * orient_name )
+{
+    char buf[ 48 ];
+    int  r;
+
+    if( auto_scan ) snprintf( buf, sizeof buf, "AUTO: grid inside the lines (%s)", orient_name );
+    else            snprintf( buf, sizeof buf, "fit the whole card in the green box" );
+    text( HINT_ROW, 2, CAM_W - 3, buf, INK, FELT );
+    for( r = GUIDE_ROW_0; r <= GUIDE_ROW_1; r++ ) {
+        put( r, GUIDE_COL_L, auto_scan ? CH_VLINE : ' ', GUI_LGREEN, FELT );
+        put( r, GUIDE_COL_R, auto_scan ? CH_VLINE : ' ', GUI_LGREEN, FELT );
+    }
+}
+
+/* The green box (camera_capture.v: preview at PV_X 8, PV_Y 32; box at screen
+ * x 72..263, y 56..247) cut into thirds with CP437 line glyphs. From the font:
+ * the horizontal stroke is scanline 7 of a cell and the vertical stroke pixel
+ * columns 3-4, so
+ *   rows 7 and 11      put the horizontal lines on y 119 and 183 (thirds: 120,
+ *                      184), across columns 9-32 = exactly x 72..263;
+ *   columns 17 and 25  put the vertical lines on x 139.5 and 203.5, 3.5 px
+ *                      right of the thirds (136, 200) -- the text grid is 8 px
+ *                      -- with the middle column exactly a third wide; they
+ *                      run rows 4-14, with T-joins in rows 3 and 15 landing on
+ *                      the box's top (y 55) and bottom (y 247) edges.
+ * Off writes ' ' back to the same cells: blank cells are transparent. */
+#define GG_ROW_TOP      3
+#define GG_ROW_BOT      15
+#define GG_COL_L        9
+#define GG_COL_R        32
+#define CH_GG_V         0xB3u       /* vertical line */
+#define CH_GG_H         0xC4u       /* horizontal line */
+#define CH_GG_X         0xC5u       /* crossing */
+#define CH_GG_T         0xC2u       /* T down: joins the box's top edge */
+#define CH_GG_B         0xC1u       /* T up: joins its bottom edge */
+
+void gui_guide_grid( int on )
+{
+    static const int ROW[ 2 ] = { 7, 11 }, COL[ 2 ] = { 17, 25 };
+    int r, c, k;
+
+    for( k = 0; k < 2; k++ ) {
+        for( c = GG_COL_L; c <= GG_COL_R; c++ ) {                  /* horizontal lines */
+            int x = c == COL[ 0 ] || c == COL[ 1 ];
+            put( ROW[ k ], c, on ? ( x ? CH_GG_X : CH_GG_H ) : ' ', GUI_LGREEN, FELT );
+        }
+        for( r = GG_ROW_TOP; r <= GG_ROW_BOT; r++ ) {              /* vertical lines */
+            unsigned ch = r == GG_ROW_TOP ? CH_GG_T : r == GG_ROW_BOT ? CH_GG_B :
+                          ( r == ROW[ 0 ] || r == ROW[ 1 ] ) ? CH_GG_X : CH_GG_V;
+            put( r, COL[ k ], on ? ch : ' ', GUI_LGREEN, FELT );
+        }
+    }
 }

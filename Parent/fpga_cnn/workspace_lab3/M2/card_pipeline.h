@@ -15,14 +15,23 @@
 #include <stdint.h>
 
 /* ---- image geometry and fixed point ------------------------------------ */
-/* 384x384, sampled 1:1 from the camera's 640x480 frame by capture_384.v. Must
- * match ghrd_top.v's IMG_PIXELS: it is where the diagnostics below start. */
+/* conv1's input: 384x384, cut by ghrd_top.v's window out of the stored frame. */
 #define IMG_DIM      384
-#define IMG_PIXELS   ( IMG_DIM * IMG_DIM )    /* 147456 */
-/* snapshot_data returns each pixel as the Q6.10 value conv1 actually read,
- * which the fabric makes as gray*4 (full scale 1020, not 1024). So the 8-bit
- * gray is exact to recover, whatever IMG_DW the bitstream was built with. */
+/* The stored frame (29 Sep, M2 whole-grid scan): capture_384.v writes a
+ * 512x384 frame -- camera x 64..575, y 48..431 -- at address row*FRAME_W + col,
+ * and conv1 reads a 384x384 window of it (ghrd_top.v's window registers). The
+ * default window is the old centred crop 1:1: frame columns GUIDE_X0 ..
+ * GUIDE_X0+383, all 384 rows. IMG_PIXELS is where the diagnostics start. */
+#define FRAME_W      512
+#define FRAME_H      384
+#define GUIDE_X0     64
+#define IMG_PIXELS   ( FRAME_W * FRAME_H )    /* 196608 */
+#define FRAME_ADDR( row, col )  ( ( unsigned ) ( row ) * FRAME_W + ( unsigned ) ( col ) )
+/* snapshot_data returns each frame word as {gray, 0, red} shifted into the
+ * Q6.10 place conv1 reads: gray*4 (full scale 1020, not 1024) with the pixel's
+ * red-test bit in bit 0. >> 2 recovers the 8-bit gray exactly. */
 #define PIX_GRAY( q )       ( ( unsigned ) ( q ) >> 2 )
+#define PIX_RED( q )        ( ( unsigned ) ( q ) & 1u )
 
 /* ---- cnn_result_pio bit layout ----------------------------------------- */
 #define RES_RANK( r )       ( ( r ) & 0xFu )
@@ -101,7 +110,8 @@ void print_camera_diag( void );
 /* dipsw_pio bits, read at the press */
 #define SW_PREVIEW      0x1u    /* SW0: print the 48x48 ASCII preview        */
 #define SW_PGM          0x2u    /* SW1: dump the full capture as a PGM       */
-#define SW_STATS        0x4u    /* SW2: print scheduling stats (RTOS build)  */
+#define SW_GRID         0x4u    /* SW2: 3x3 guide grid in the green box, to
+                                 * line cards up (RTOS build; HDMI only)     */
 #define SW_AUTO         0x8u    /* SW3: capture automatically, no KEY needed
                                  * (RTOS build; every AUTO_PERIOD_MS)       */
 
@@ -115,6 +125,60 @@ enum vision_status
     VIS_INFER_TIMEOUT       /* the CNN never raised done                               */
 };
 
+/* ---- whole-grid scan (M2 demo): cards found in the frame ------------------
+ * locate.c fills these; lab 5/locate.py is the bit-exact reference. */
+#define SCAN_MAX        25      /* a 5x5 grid at most */
+
+struct scan_card
+{
+    uint16_t x0, y0, x1, y1;    /* frame px, inclusive */
+    uint8_t  row, col;          /* the professor's (row, col), from 1 */
+    uint8_t  red;               /* its index corners read red */
+    uint8_t  pad;
+};
+
+struct scan_result
+{
+    uint32_t n;                 /* cards found (capped at SCAN_MAX) */
+    uint32_t nrows, ncols;
+    uint32_t threshold;         /* Otsu grey level card/mat */
+    struct scan_card card[ SCAN_MAX ];
+};
+
+/* conv1's window registers (ghrd_top.v, text-layer bus 0xE00 + n) */
+struct win_regs
+{
+    int16_t  x0, y0;            /* frame px of virtual (0,0); may be < 0 */
+    uint16_t step;              /* Q8.8 frame px per virtual px */
+    uint16_t flags;             /* WIN_T | WIN_FX | WIN_FY */
+    uint16_t clip[ 4 ];         /* x0, y0, x1, y1, inclusive */
+};
+#define WIN_T           1u
+#define WIN_FX          2u
+#define WIN_FY          4u
+#define WIN_REG_BASE    0xE00u  /* img_wr_addr of register 0 */
+
+/* orient: how the frame's axes map onto the professor's (row, col) */
+#define ORIENT_SWAP     1u      /* rows run along frame x: the camera turned 90 deg */
+#define ORIENT_FLIP_R   2u      /* rows numbered from the far end */
+#define ORIENT_FLIP_C   4u
+
+/* What one CPU1 job does (amp.h carries it; vision_do dispatches). */
+enum vjob_kind
+{
+    VJOB_FULL = 0,          /* guided read: capture, sample, CNN on the default window */
+    VJOB_CAPTURE,           /* capture a frame only */
+    VJOB_LOCATE,            /* find the cards in the captured frame -> scan */
+    VJOB_INFER              /* one CNN read through the window CPU0 set up */
+};
+
+struct vision_job
+{
+    uint32_t kind;          /* enum vjob_kind */
+    uint32_t orient;        /* VJOB_LOCATE: ORIENT_* bits */
+    uint32_t colour_red;    /* VJOB_INFER: the colour flag to force */
+};
+
 struct vision_result
 {
     uint32_t status;        /* enum vision_status */
@@ -123,10 +187,14 @@ struct vision_result
     uint32_t minv, maxv;    /* over the 48x48 sample grid; equal = flat/blank frame */
     uint32_t cap_us, inf_us;
     char     art[ PREVIEW_DIM * PREVIEW_DIM ];   /* valid when the capture succeeded */
+    struct scan_result scan;                     /* VJOB_LOCATE only */
 };
 
 /* Run one job. FPGA PIOs and memory only -- safe on CPU1. */
 void vision_run( struct vision_result * v );
+
+/* Run a job of any kind (vision_run is VJOB_FULL). Safe on CPU1. */
+void vision_do( const struct vision_job * j, struct vision_result * v );
 
 /* CPU0 only. print_vision_result prints one "[shot] ..." line (plus camera
  * diagnostics on a camera failure); `where` is appended as "  [where]" when

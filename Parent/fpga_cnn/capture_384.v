@@ -40,10 +40,15 @@
 // trained with +/-5% translation (RandomAffine, ~19 px at 384), so a 1-2 px
 // offset is invisible to it.
 //
-// Cell sums are single camera pixels now, max 255 (was 2 px / 510 at 96x96,
-// 25 px / 6375 at 48x48). The image RAM stores gray<<2 (approximately Q6.10,
-// max 1020 of 1024) at IMG_DW bits -- IMG_DW<10 keeps only the top bits,
-// which is the M10K-budget trim the trainer's --quant_bits matches.
+// M2 WHOLE-GRID SCAN (29 Sep). The crop is now a 512x384 frame -- camera
+// x 64..575, y 48..431, i.e. the old 384x384 window plus 64 columns each
+// side -- so a whole card grid fits, and conv1 reads one card at a time out
+// of it through its window mapper (conv_layer.v WIN_MAP). Pixels land at
+// address {row, col}. Each word is {gray[7:0], 1'b0, is_red}: gray<<2 as
+// before (approximately Q6.10, max 1020 of 1024), with the red-pixel test in
+// the LSB that used to be always zero, so the host can count red pixels in
+// any card's index corner. red_count / colour_hw still cover only the old
+// 384x384 window, so guided mode's colour flag is unchanged.
 //
 // HPS side: no read-back port here. capture_384 writes card_cnn_core's image
 // RAM directly; PGM dumps and the sim round-trip read it back through that
@@ -76,11 +81,15 @@ module capture_384 #(
     output reg [17:0]  red_count
 );
 
-    // crop geometry: 384x384, centred in the 640x480 raw frame
-    localparam CROP_X0 = 10'd128;            // 384 columns: 128..511
-    localparam CROP_X1 = 10'd512;
+    // frame geometry: 512x384, centred in the 640x480 raw frame
+    localparam CROP_X0 = 10'd64;             // 512 columns: 64..575
+    localparam CROP_X1 = 10'd576;
     localparam CROP_Y0 = 9'd48;               // 384 rows: 48..431
     localparam CROP_Y1 = 9'd432;
+    // the old 384x384 capture window, still the guided-mode window and the
+    // region red_count covers
+    localparam GUIDE_X0 = 10'd128;
+    localparam GUIDE_X1 = 10'd512;
 
     localparam LAT_RGB = 2;                   // Line_Buffer_J (1) + RAW_RGB_BIN (1)
 
@@ -135,20 +144,24 @@ module capture_384 #(
                        + {8'b0, blue} * 16'd29;
     wire [7:0]  gray  = lum16[15:8];
 
-    // Quantise to IMG_DW bits of an approximate Q6.10 magnitude (gray*4, which
-    // peaks at 1020 of 1024): keep the top IMG_DW bits. At IMG_DW=10 this is
-    // gray<<2 unchanged; at IMG_DW=5 it is gray>>3, matching the trainer's
-    // QuantizeInput(bits=5). card_cnn_core.v expands it back by shifting the
-    // dropped bits in as zero, which is exact.
-    wire [IMG_DW-1:0] img_code = ({gray, 2'b00}) >> (10 - IMG_DW);
-
-    wire [17:0] wr_idx = (cy_rgb - CROP_Y0) * 18'd384 + (cx_rgb - CROP_X0);
-
     // Ratio test (R > 1.5G and R > 1.5B), same as downsample_96x96.v -- robust
-    // to the D8M's warm white balance.
-    wire is_red = in_crop && (red > RED_MIN)
-                          && ({1'b0, red} > {1'b0, green} + {2'b0, green[7:1]})
-                          && ({1'b0, red} > {1'b0, blue}  + {2'b0, blue[7:1]});
+    // to the D8M's warm white balance. red_px is the per-pixel bit stored with
+    // the grey; is_red is the count guided mode's colour flag uses.
+    wire red_px = (red > RED_MIN)
+               && ({1'b0, red} > {1'b0, green} + {2'b0, green[7:1]})
+               && ({1'b0, red} > {1'b0, blue}  + {2'b0, blue[7:1]});
+    wire is_red = in_crop && red_px && (cx_rgb >= GUIDE_X0) && (cx_rgb < GUIDE_X1);
+
+    // {gray, 0, red}: gray*4 in the top 8 of 10 bits as before, the red bit in
+    // the LSB. card_cnn_core.v masks the two LSBs off before conv1 and insists
+    // on IMG_DW == 10.
+    wire [IMG_DW-1:0] img_code = {gray, 1'b0, red_px};
+
+    // {row, col}: FRAME_W is 512, so the row is just the high bits
+    wire [8:0]  wr_row = cy_rgb - CROP_Y0;
+    wire [9:0]  wr_col = cx_rgb - CROP_X0;
+    wire [17:0] wr_idx = {wr_row, wr_col[8:0]};
+
     reg [17:0] red_cnt;
     always @(posedge mipi_clk)
         if (vs_rise) red_cnt <= 18'd0; else if (is_red) red_cnt <= red_cnt + 18'd1;

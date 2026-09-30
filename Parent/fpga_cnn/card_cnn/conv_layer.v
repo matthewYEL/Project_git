@@ -76,7 +76,16 @@ module conv_layer #(
     // dropping 16 -> 10 halves a ROM's block count. On fcs_w (147,520 words)
     // that is 289 blocks down to 145 -- which is what pays for the 384x384
     // image RAM.
-    parameter W_BITS  = 16
+    parameter W_BITS  = 16,
+    // conv1 of the M2 whole-grid scan: read a square window of the stored
+    // FRAME_W x FRAME_H grey frame (one card), scaled onto this layer's
+    // DIM x DIM input, instead of a DIM x DIM image. The frame is addressed
+    // {row, col}, so FRAME_W must be a power of two. See "window mapper" below.
+    // Only meaningful with IN_CH == 1; other layers leave it 0 and tie the
+    // win_* / clip_* ports to 0.
+    parameter WIN_MAP = 0,
+    parameter FRAME_W = 512,
+    parameter FRAME_H = 384
 
 )(
     input  wire                 clk,
@@ -91,7 +100,17 @@ module conv_layer #(
     // write port -> output activation RAM
     output reg  [OUT_AW-1:0]    out_wr_addr,
     output reg  signed [15:0]   out_wr_data,
-    output reg                  out_wr_en
+    output reg                  out_wr_en,
+
+    // window registers (WIN_MAP only), held for the whole layer by the caller
+    input  wire signed [10:0]   win_x0,      // frame column of virtual (0, 0); may be < 0
+    input  wire signed [10:0]   win_y0,      // frame row of virtual (0, 0)
+    input  wire        [8:0]    win_step,    // Q8.8 frame px per virtual px (256 = 1:1)
+    input  wire        [2:0]    win_flags,   // [0] transpose [1] flip x [2] flip y
+    input  wire        [9:0]    clip_x0,     // inclusive frame rectangle; taps outside read 0
+    input  wire        [9:0]    clip_y0,
+    input  wire        [9:0]    clip_x1,
+    input  wire        [9:0]    clip_y1
 );
 
     localparam N_W  = OUT_CH * IN_CH * K * K;
@@ -151,6 +170,33 @@ module conv_layer #(
 
     wire [IN_AW-1:0] tap_addr = c*PLANE + iy*DIM + ix;
     wire [$clog2(N_W)-1:0] w_addr = ((f*IN_CH + c)*K + ky)*K + kx;
+
+    // ---- window mapper (WIN_MAP) ------------------------------------------
+    // Virtual tap (iy, ix), valid when in_bounds: u = flip x ? DIM-1-ix : ix,
+    // v likewise from iy with flip y; su = (u*STEP)>>8, sv = (v*STEP)>>8; the
+    // frame pixel is (col, row) = transpose ? (X0+sv, Y0+su) : (X0+su, Y0+sv).
+    // Taps outside the clip rectangle or the frame read zero, exactly like the
+    // padding taps. Transpose plus one flip turns a sideways card upright.
+    // sim_card_cnn.window_map() is the bit-exact reference.
+    //
+    // Combinational into in_rd_addr: two 9x9 multiplies, two adds and the
+    // compares. If the fitter shows this path short of 50 MHz, register su/sv
+    // one stage earlier (and extend the issue/bounds/weight pipeline by one).
+    localparam COLB = $clog2(FRAME_W);
+    wire [8:0]  wu   = win_flags[1] ? (DIM - 1 - ix[8:0]) : ix[8:0];
+    wire [8:0]  wv   = win_flags[2] ? (DIM - 1 - iy[8:0]) : iy[8:0];
+    wire [17:0] pu   = wu * win_step;
+    wire [17:0] pv   = wv * win_step;
+    wire [9:0]  su   = pu[17:8];
+    wire [9:0]  sv   = pv[17:8];
+    wire signed [11:0] fcol = win_x0 + $signed({2'b00, win_flags[0] ? sv : su});
+    wire signed [11:0] frow = win_y0 + $signed({2'b00, win_flags[0] ? su : sv});
+    wire in_window = (fcol >= $signed({2'b00, clip_x0})) && (fcol <= $signed({2'b00, clip_x1}))
+                  && (frow >= $signed({2'b00, clip_y0})) && (frow <= $signed({2'b00, clip_y1}))
+                  && (fcol >= 0) && (fcol < FRAME_W) && (frow >= 0) && (frow < FRAME_H);
+
+    wire             tap_ok  = WIN_MAP ? (in_bounds && in_window) : in_bounds;
+    wire [IN_AW-1:0] rd_next = WIN_MAP ? {frow[IN_AW-COLB-1:0], fcol[COLB-1:0]} : tap_addr;
 
     localparam S_IDLE = 3'd0,
                S_INIT = 3'd1,
@@ -246,9 +292,9 @@ module conv_layer #(
                 // One tap issued per cycle; the multiply for a tap happens on
                 // the following cycle, when its RAM data has arrived.
                 S_RUN: begin
-                    in_rd_addr <= in_bounds ? tap_addr : {IN_AW{1'b0}};
+                    in_rd_addr <= tap_ok ? rd_next : {IN_AW{1'b0}};
                     w_d1       <= w_mem[w_addr];
-                    bounds_d1  <= in_bounds;
+                    bounds_d1  <= tap_ok;
                     issue_v_d1 <= 1'b1;
 
                     if (last_tap) begin

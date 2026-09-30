@@ -147,7 +147,7 @@ module ghrd_top (
   // trained at the same depth (the trainer's --quant_bits).
   localparam        CONV1_CH   = 8;
   localparam        IMG_DW     = 10;
-  localparam [17:0] IMG_PIXELS = 18'd147456;   // 384*384; card_pipeline.h IMG_PIXELS
+  localparam [17:0] IMG_PIXELS = 18'd196608;   // the 512x384 frame; card_pipeline.h IMG_PIXELS
 
   // ---------- HPS <-> CNN / camera PIOs (see atlas_main.c for the bit layout) ----------
   wire [31:0] cnn_result_wire;     // [3:0] rank [5:4] suit [6] joker [7] done [8] colour [9] snapshot_done [31:16] rank_score
@@ -166,9 +166,10 @@ module ghrd_top (
   wire [3:0]  img_wr_ctrl_wire;    // [0] unused (was wr_en), [1] unused, [2] colour override en, [3] colour override val
 
   // ---------- 新增：摄像头相关连线 ----------
-  // snapshot_addr 0..147455 reads the captured image (Q6.10, one pixel per
-  // word); 147456..147463 = IMG_PIXELS + n reads the capture diagnostics, in
-  // the same order card_pipeline.h's SNAP_* constants have always used.
+  // snapshot_addr 0..196607 reads the captured 512x384 frame at {row, col}
+  // (gray*4 with the red bit in bit 0, one pixel per word); 196608..196615 =
+  // IMG_PIXELS + n reads the capture diagnostics, in the same order
+  // card_pipeline.h's SNAP_* constants have always used.
   // 18 bits since soc_system.qsys widened the PIO -- needs qsys-generate.
   wire [17:0] snapshot_addr_wire;
   wire [15:0] snapshot_data_wire;
@@ -328,6 +329,51 @@ debounce debounce_inst (
   reg  colour_lat;
   always @(posedge fpga_clk_50) if (start_pulse) colour_lat <= colour_sel;
 
+  // ---------- conv1's window into the frame (M2 whole-grid scan) ----------
+  // CPU0 writes these over the text-layer bus -- img_wr_data = the value,
+  // img_wr_addr = 0xE00 + n with bit 13 as the write enable, the same
+  // three-access sequence as a text cell (the text RAM only takes addresses
+  // below 2400, see txt_wr_en). No qsys change.
+  //   n 0 X0  signed frame column of virtual (0,0)   1 Y0  its row
+  //     2 STEP  Q8.8 frame px per virtual px (256 = 1:1)
+  //     3 FLAGS [0] transpose [1] flip x [2] flip y
+  //     4..7 clip x0, y0, x1, y1: inclusive frame rectangle, outside reads 0
+  // Reset values: the old centred 384x384 crop at 1:1 with no clip, so guided
+  // mode -- and any app that never writes them -- reads exactly what it did.
+  // Latched on the start pulse, like the colour, so they hold through the
+  // ~1.7 s inference whatever the bus does. sim_card_cnn.window_map() models
+  // the mapping bit-exactly.
+  wire       win_we  = img_wr_addr_wire[13] && (img_wr_addr_wire[11:8] == 4'hE);
+  wire [2:0] win_idx = img_wr_addr_wire[2:0];
+  reg signed [10:0] win_x0_r, win_y0_r, win_x0_l, win_y0_l;
+  reg        [8:0]  win_step_r, win_step_l;
+  reg        [2:0]  win_flags_r, win_flags_l;
+  reg        [9:0]  clip_x0_r, clip_y0_r, clip_x1_r, clip_y1_r;
+  reg        [9:0]  clip_x0_l, clip_y0_l, clip_x1_l, clip_y1_l;
+  always @(posedge fpga_clk_50) begin
+    if (core_rst) begin
+      win_x0_r  <= 11'sd64; win_y0_r  <= 11'sd0; win_step_r <= 9'd256; win_flags_r <= 3'd0;
+      clip_x0_r <= 10'd0;   clip_y0_r <= 10'd0;  clip_x1_r  <= 10'd511; clip_y1_r  <= 10'd383;
+    end else if (win_we) begin
+      case (win_idx)
+        3'd0: win_x0_r    <= img_wr_data_wire[10:0];
+        3'd1: win_y0_r    <= img_wr_data_wire[10:0];
+        3'd2: win_step_r  <= img_wr_data_wire[8:0];
+        3'd3: win_flags_r <= img_wr_data_wire[2:0];
+        3'd4: clip_x0_r   <= img_wr_data_wire[9:0];
+        3'd5: clip_y0_r   <= img_wr_data_wire[9:0];
+        3'd6: clip_x1_r   <= img_wr_data_wire[9:0];
+        3'd7: clip_y1_r   <= img_wr_data_wire[9:0];
+      endcase
+    end
+    if (core_rst | start_pulse) begin
+      win_x0_l  <= core_rst ? 11'sd64 : win_x0_r;   win_y0_l    <= core_rst ? 11'sd0 : win_y0_r;
+      win_step_l <= core_rst ? 9'd256 : win_step_r; win_flags_l <= core_rst ? 3'd0  : win_flags_r;
+      clip_x0_l <= core_rst ? 10'd0   : clip_x0_r;  clip_y0_l   <= core_rst ? 10'd0   : clip_y0_r;
+      clip_x1_l <= core_rst ? 10'd511 : clip_x1_r;  clip_y1_l   <= core_rst ? 10'd383 : clip_y1_r;
+    end
+  end
+
   // the core's done is a 1-cycle pulse; software polls a sticky copy
   reg done_sticky;
   always @(posedge fpga_clk_50)
@@ -358,6 +404,14 @@ debounce debounce_inst (
       .img_dbg_addr (snapshot_addr_wire),
       .img_dbg_data (img_dbg_data),
       .colour_flag  (colour_lat),
+      .win_x0       (win_x0_l),
+      .win_y0       (win_y0_l),
+      .win_step     (win_step_l),
+      .win_flags    (win_flags_l),
+      .clip_x0      (clip_x0_l),
+      .clip_y0      (clip_y0_l),
+      .clip_x1      (clip_x1_l),
+      .clip_y1      (clip_y1_l),
       .rank_idx     (rank_idx),
       .suit_idx     (suit_idx),
       .is_joker     (is_joker),
@@ -430,7 +484,8 @@ debounce debounce_inst (
       .snapshot_done(snapshot_done_w),
       .snapshot_colour(snapshot_colour_w),
 
-      .txt_wr_en(img_wr_addr_wire[13]),
+      // cells 0..2399 only: addresses from 0xE00 up are the window registers
+      .txt_wr_en(img_wr_addr_wire[13] && (img_wr_addr_wire[11:0] < 12'd2400)),
       .txt_wr_addr(img_wr_addr_wire[11:0]),
       .txt_wr_data(img_wr_data_wire)
   );

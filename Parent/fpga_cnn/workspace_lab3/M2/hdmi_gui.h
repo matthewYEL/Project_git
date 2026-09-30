@@ -11,6 +11,8 @@
 #ifndef HDMI_GUI_H
 #define HDMI_GUI_H
 
+#include <stdint.h>
+
 struct vision_result;
 
 /* The text layer's 16-colour CGA palette, in text_overlay.v's order. */
@@ -39,5 +41,27 @@ void gui_clear( void );
  * "g3".."g5" a new face-down game, "r" the same board again, "a1".."e5" the
  * cell the next read goes to. 0 if it is none of these. */
 int gui_command( const char * cmd );
+
+/* ---- whole-grid scan (M2 demo) --------------------------------------------
+ * The board then shows the grid the camera found, labelled by the professor's
+ * (row, col); pairs are numbered by grid.c as in a guided scan. */
+struct scan_result;
+struct win_regs;
+void gui_scan_begin( const struct scan_result * s );
+void gui_scan_card( unsigned row, unsigned col, uint32_t result, unsigned shot );
+void gui_scan_done( void );
+
+/* The hint under the camera: what KEY0 does now, and the camera orientation. */
+void gui_mode( int auto_scan, const char * orient_name );
+
+/* SW2: a 3x3 grid of thin green lines inside the green box, to line the cards
+ * up. Drawn with the text layer's line glyphs over the live video, so it is on
+ * HDMI only -- never in the camera frame the CNN reads. */
+void gui_guide_grid( int on );
+
+/* conv1's window registers (ghrd_top.v, img_wr_addr 0xE00 + n). They share
+ * the text layer's bus, so like the text they are written from CPU0 only; the
+ * bus is locked against the other CPU0 task for each 3-access write. */
+void win_write( const struct win_regs * w );
 
 #endif /* HDMI_GUI_H */
