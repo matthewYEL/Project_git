@@ -26,6 +26,7 @@ Companion to sim_cnn.py, which models the OLD 28x28 single-head datapath
   python sim_card_cnn.py capture.txt --png    # also render the capture to a .png
   python sim_card_cnn.py --frames dumps/deck.log   # every SW1 dump in a PuTTY log -> PNG
   python sim_card_cnn.py --scan dumps/deck.log     # replay every grid scan in it
+  python sim_card_cnn.py --scan dumps/pics1.bin    # ... or in pictures saved from Arm DS (M2/pics.h)
 
 Both colour branches are printed; read the one matching the board's colour_hw.
 
@@ -172,11 +173,58 @@ def infer(img, colour_red, verbose=False):
 
 # ---------------- input ----------------
 
+PIC_MAGIC = b'D8MPICS1'
+PIC_SCAN_MAX = 25                                  # card_pipeline.h SCAN_MAX
+PIC_META = 8 + 4 * PIC_SCAN_MAX + 2 * PIC_SCAN_MAX + 2   # pics.h struct pic_meta, 160 B
+
+
+def _pic_file(path):
+    """The pictures in a D8MPICS1 file -- M2/pics.h's ring of SW1 pictures,
+    saved from Arm DS over the USB-Blaster cable (30 Sep: no UART needed).
+    [(picture number, words (H, W), [(row, col, board's result word)])], oldest
+    first; None if the file is something else."""
+    raw = open(path, 'rb').read()
+    if raw[:len(PIC_MAGIC)] != PIC_MAGIC:
+        return None
+    w, h, slots, _count = (int(v) for v in np.frombuffer(raw, '<u4', 4, 8))
+    at = 32 + slots * PIC_META                     # the frames follow the meta table
+    if len(raw) < at + slots * w * h * 2:
+        sys.exit(f'{path}: {len(raw)} bytes, but {slots} pictures of {w}x{h} need '
+                 f'{at + slots * w * h * 2} -- saved with the wrong end address?')
+    out = []
+    for k in range(slots):
+        m = 32 + k * PIC_META
+        seq, n = (int(v) for v in np.frombuffer(raw, '<u4', 2, m))
+        if not seq:
+            continue                               # never used, or caught mid-copy
+        words = np.frombuffer(raw, '<u4', PIC_SCAN_MAX, m + 8)
+        rows = np.frombuffer(raw, 'u1', PIC_SCAN_MAX, m + 8 + 4 * PIC_SCAN_MAX)
+        cols = np.frombuffer(raw, 'u1', PIC_SCAN_MAX, m + 8 + 5 * PIC_SCAN_MAX)
+        frame = np.frombuffer(raw, '<u2', w * h, at + k * w * h * 2).astype(np.int64).reshape(h, w)
+        out.append((seq, frame, [(int(rows[i]), int(cols[i]), int(words[i])) for i in range(n)]))
+    return sorted(out, key=lambda t: t[0])
+
+
+def _word_name(wd):
+    """A board result word (card_pipeline.h RES_*) as the sim names a read."""
+    if not (wd >> 7) & 1 or (wd >> 10) & 1:
+        return 'no read'
+    if (wd >> 6) & 1:
+        return 'JOKER'
+    return f'{RANK[wd & 0xF]} of {SUIT[(wd >> 4) & 3]}' if (wd & 0xF) < 13 else 'no read'
+
+
 def _pgm_blocks(path):
     """Every P2 block in a file: a bare .pgm, one console paste, or a whole
     PuTTY session log holding many SW1 dumps. Yields (k, w, h, maxval, words),
     k counting every P2 header from 1 so it follows the shot order even when a
-    truncated dump (PuTTY closed, a key typed mid-dump) is skipped."""
+    truncated dump (PuTTY closed, a key typed mid-dump) is skipped. A D8MPICS1
+    file saved from Arm DS yields its pictures, k = the board's picture number."""
+    pics = _pic_file(path)
+    if pics is not None:
+        for seq, frame, _reads in pics:
+            yield seq, frame.shape[1], frame.shape[0], 1023, frame
+        return
     tok = open(path, encoding='latin-1').read().split()    # latin-1: line noise never fails
     k = 0
     for i, t in enumerate(tok):
@@ -245,9 +293,12 @@ def scan(path, orient_idx=0):
     """Replay every board grid scan in a file -- one SW1 whole-frame dump or a
     PuTTY log of many: each frame through locate + the window mapper + the
     bit-exact network with the board's vote (read_cards, prvReadCard), printed
-    like the board's UART lines so the two can be compared card for card."""
+    like the board's UART lines so the two can be compared card for card. A
+    D8MPICS1 file carries the board's own reads too: each line then ends with
+    the board's answer, or DIFFERS if the board read it otherwise."""
     import locate
     orient = SCAN_ORIENTS[orient_idx]
+    board = {seq: {(r, c): wd for r, c, wd in reads} for seq, _f, reads in _pic_file(path) or []}
     done = 0
     for k, w, h, maxval, words in _pgm_blocks(path):
         if maxval != 1023:
@@ -267,8 +318,12 @@ def scan(path, orient_idx=0):
         got = []
         for card, (r, s, score, j), rf, win, is_red, nread, agree, _single in reads:
             name = 'JOKER' if j else f'{r} of {s}'
+            bw = board.get(k, {}).get((card.row, card.col))
+            said = '' if bw is None else (
+                '   board: same' if _word_name(bw) == name and int(np.int16(bw >> 16)) == score else
+                f'   board: {_word_name(bw)} logit {int(np.int16(bw >> 16))}  <-- DIFFERS')
             print(f'  ({card.row},{card.col})  {name:<18} logit {score:6d}  {"red" if is_red else "black":<5}'
-                  f'  [{nread} reads, {agree} agree]   box x{card.x0}-{card.x1} y{card.y0}-{card.y1}')
+                  f'  [{nread} reads, {agree} agree]   box x{card.x0}-{card.x1} y{card.y0}-{card.y1}{said}')
             got.append((card.row, card.col, r, s, j))
         print('  pairs:')
         for line in pair_lines(got) or ['none']:
@@ -865,10 +920,11 @@ if __name__ == '__main__':
                          'rotated camera sees the table')
     ap.add_argument('--scan', metavar='DUMP',
                     help='replay every board grid scan in a file of SW1 whole-frame dumps (maxval 1023): '
-                         'one paste or a whole PuTTY log')
+                         'one paste, a whole PuTTY log, or pictures saved from Arm DS (M2/pics.h) -- '
+                         'those carry the board\'s own reads, compared card by card')
     ap.add_argument('--frames', metavar='LOG',
-                    help='every frame dump in a file (a paste or a whole PuTTY log) -> <file>_<n>.png, '
-                         'red-test bits tinted red, plus one exposure line each')
+                    help='every frame dump in a file (a paste, a whole PuTTY log, or pictures saved from '
+                         'Arm DS) -> <file>_<n>.png, red-test bits tinted red, plus one exposure line each')
     ap.add_argument('--orient', type=int, default=0, choices=range(len(SCAN_ORIENTS)),
                     help='with --scan: the board\'s orientation (UART o): 0 upright, 1 cam CW, 2 cam CCW, 3 cam 180')
     a = ap.parse_args()

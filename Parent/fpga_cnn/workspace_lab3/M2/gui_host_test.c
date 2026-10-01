@@ -187,7 +187,7 @@ int main( int argc, char ** argv )
     /* ---- the dashboard: a face-up 3x3 scan (round 1) --------------------- */
 
     gui_init();
-    EXPECT( 0, "CARD TABLE" );
+    EXPECT( 0, "GAME OF POKER" );
     EXPECT( 0, " READY " );
     assert( bg_at( 0, 78 ) == GUI_LGREEN && bg_at( 0, 79 ) == GUI_BROWN );  /* pill ends in col 78 */
     EXPECT( 1, "LIVE CAMERA" );
@@ -197,6 +197,7 @@ int main( int argc, char ** argv )
     EXPECT( 21, "READ 0/9" );
     EXPECT( 29, "KEY1 undo/hold:new" );
     EXPECT( 29, "UART h" );
+    EXPECT( 29, "SW0 turn" );
     assert( bg_at( 20, 0 ) == GUI_BROWN && bg_at( 20, 79 ) == GUI_BROWN );  /* the rail */
     assert( bg_at( 18, 60 ) == GUI_GREEN );                  /* bare felt */
     /* 3x3 cards are 9x7 at columns 47/58/69, rows 5/13/21; A1 is next (brass) */
@@ -260,7 +261,7 @@ int main( int argc, char ** argv )
     EXPECT( 21, "READ 9/9    PAIRS 4" );                     /* none of those placed */
     gui_status( "READING #12345 (CPU1)", GUI_YELLOW );       /* the longest app_rtos.c sends */
     EXPECT( 0, "READING #12345 (CPU1) " );
-    EXPECT( 0, "CARD TABLE" );
+    EXPECT( 0, "GAME OF POKER" );
     gui_status( "READY", GUI_LGREEN );
     PREVIEW_BLANK();
     dump( argc > 1 ? argv[ 1 ] : NULL );
@@ -390,6 +391,44 @@ int main( int argc, char ** argv )
         EXPECT( 0, "NO READ AT (2,2)" );
         PREVIEW_BLANK();
         dump( argc > 5 ? argv[ 5 ] : NULL );
+
+        gui_undo();                                          /* KEY1 tap: the 3x3 result again */
+        EXPECT( 0, "UNDID LAST SCAN" );
+        EXPECT( 1, "GRID SCAN 3 x 3" );
+        EXPECT( 21, "READ 9/9    PAIRS 2" );
+        EXPECT( 22, " 1 7  (1,1)+(2,2)" );
+        gui_undo();                                          /* one level only */
+        EXPECT( 0, "NOTHING TO UNDO" );
+
+        /* the 4x4 round: 16 cards, card k and k + 8 share a rank -> eight pairs */
+        s.n = 16;
+        s.nrows = s.ncols = 4;
+        for( k = 0; k < 16; k++ ) {
+            s.card[ k ].row = ( uint8_t ) ( k / 4 + 1 );
+            s.card[ k ].col = ( uint8_t ) ( k % 4 + 1 );
+        }
+        gui_scan_begin( &s );
+        EXPECT( 0, "SCANNING 16 CARDS" );
+        EXPECT( 1, "GRID SCAN 4 x 4" );
+        for( k = 0; k < 16; k++ ) {
+            v = card( k % 8, k < 8 ? SPADES : HEARTS, 0, 900 );
+            gui_scan_card( s.card[ k ].row, s.card[ k ].col, v.result, 400 + k );
+        }
+        gui_scan_done();
+        EXPECT( 0, "SCAN DONE - 8 PAIRS" );
+        EXPECT( 21, "READ 16/16    PAIRS 8" );
+        EXPECT( 22, " 1 2  (1,1)+(3,1)" );
+        EXPECT( 22, " 7 8  (2,3)+(4,3)" );                   /* the second column of pairs */
+        EXPECT( 23, " 8 9  (2,4)+(4,4)" );
+        PREVIEW_BLANK();
+        dump( argc > 7 ? argv[ 7 ] : NULL );
+        gui_clear();                                         /* KEY1 held: a clean board ... */
+        EXPECT( 21, "READ 0/16" );
+        gui_undo();                                          /* ... and a tap brings the 4x4 back */
+        EXPECT( 0, "UNDID LAST SCAN" );
+        EXPECT( 1, "GRID SCAN 4 x 4" );
+        EXPECT( 21, "READ 16/16    PAIRS 8" );
+
         assert( gui_command( "3" ) );                        /* a guided board: letters again */
         EXPECT( 1, "FACE-UP 3x3" );
 
@@ -401,16 +440,66 @@ int main( int argc, char ** argv )
         EXPECT( 18, "fit the whole card in the green box" );
         PREVIEW_BLANK();
 
-        gui_guide_grid( 1 );                                 /* SW2 up: 3x3 in the green box */
-        assert( ch_at( 7, 9 ) == 0xC4 && ch_at( 7, 32 ) == 0xC4 && ch_at( 11, 20 ) == 0xC4 );
-        assert( ch_at( 7, 17 ) == 0xC5 && ch_at( 11, 25 ) == 0xC5 );
-        assert( ch_at( 3, 17 ) == 0xC2 && ch_at( 3, 25 ) == 0xC2 );
-        assert( ch_at( 15, 17 ) == 0xC1 && ch_at( 15, 25 ) == 0xC1 );
-        assert( ch_at( 5, 17 ) == 0xB3 && ch_at( 13, 25 ) == 0xB3 );
-        assert( ch_at( 7, 8 ) == ' ' && ch_at( 7, 33 ) == ' ' && ch_at( 2, 17 ) == ' ' && ch_at( 16, 25 ) == ' ' );
-        assert( fg_at( 7, 9 ) == GUI_LGREEN );
+    }
+
+    /* ---- SW2: the camera's face-down game, one player ----------------------- */
+    {
+        uint32_t h7 = card( R7, HEARTS, 0, 900 ).result, d7 = card( R7, DIAMONDS, 0, 900 ).result,
+                 sk = card( RK, SPADES, 0, 900 ).result;
+        static const struct { unsigned r1, c1, r2, c2, rank; } ALL[ 4 ] = {
+            { 1, 1, 1, 2, RA }, { 1, 3, 2, 1, 0 }, { 2, 2, 2, 3, R3 }, { 3, 1, 3, 2, 2 },
+        };
+        unsigned k;
+
+        gui_game_begin( 3 );                                 /* the camera saw 3x3, all face down */
+        EXPECT( 0, "GAME 3x3 READY" );
+        EXPECT( 1, "FACE-DOWN GAME 3 x 3" );
+        EXPECT( 19, "TURN 1: turn 2 cards up, KEY0" );
+        EXPECT( 21, "TURN 1    PAIRS 0" );
+        EXPECT( 22, "LEFT    9 of 9 cards" );
+        EXPECT( 29, "SW2 game" );
+        assert( gui_game_n() == 3 && gui_game_matched() == 0 );
+
+        assert( gui_game_turn( 1, 1, h7, 2, 2, sk, 500 ) == OUT_NO_MATCH );
+        EXPECT( 0, "NO PAIR 7H(1,1) KS(2,2)" );
+        EXPECT( 19, "TURN 2: turn 2 cards up, KEY0" );
+        EXPECT( 24, "NO PAIR  (1,1)+(2,2) - turn them back" );
+        assert( gui_game_matched() == 0 );
+
+        assert( gui_game_turn( 1, 1, h7, 3, 2, d7, 501 ) == OUT_MATCH );   /* the 7 again, and its partner */
+        EXPECT( 0, "PAIR! 7H(1,1) 7D(3,2)" );
+        EXPECT( 21, "TURN 3    PAIRS 1" );
+        EXPECT( 22, "LEFT    7 of 9 cards" );
+        EXPECT( 24, "PAIR  (1,1)+(3,2)" );
+        assert( gui_game_matched() == ( ( 1u << 0 ) | ( 1u << ( 2 * GRID_MAX + 1 ) ) ) );
+        PREVIEW_BLANK();
         dump( argc > 6 ? argv[ 6 ] : NULL );
-        gui_guide_grid( 0 );                                 /* SW2 down: gone */
+
+        assert( gui_game_turn( 1, 1, h7, 2, 2, sk, 502 ) == OUT_NONE );    /* a found pair's cell: refused */
+        EXPECT( 0, "NOT FACE-DOWN CELLS" );
+        EXPECT( 21, "TURN 3    PAIRS 1" );                                  /* nothing changed */
+        gui_undo();                                                          /* KEY1 tap: back before the pair */
+        EXPECT( 0, "UNDID LAST TURN" );
+        EXPECT( 21, "TURN 2    PAIRS 0" );
+        assert( gui_game_matched() == 0 );
+        gui_undo();
+        EXPECT( 0, "NOTHING TO UNDO" );
+
+        gui_clear();                                                         /* KEY1 held: all face down again */
+        EXPECT( 19, "TURN 1: turn 2 cards up, KEY0" );
+        EXPECT( 22, "LEFT    9 of 9 cards" );
+        assert( gui_game_n() == 3 );
+        for( k = 0; k < 4; k++ ) {                                           /* a whole game: four pairs */
+            uint32_t w = card( ALL[ k ].rank, SPADES, 0, 900 ).result, x = card( ALL[ k ].rank, CLUBS, 0, 900 ).result;
+            assert( gui_game_turn( ALL[ k ].r1, ALL[ k ].c1, w, ALL[ k ].r2, ALL[ k ].c2, x, 510 + k ) == OUT_MATCH );
+        }
+        EXPECT( 19, "GAME OVER - 4 PAIRS IN 4 TURNS" );
+        EXPECT( 22, "LEFT    1 of 9 cards" );
+
+        assert( gui_command( "g3" ) );                       /* the guided two-team game is unchanged */
+        EXPECT( 1, "FACE-DOWN GAME 3x3" );
+        EXPECT( 21, "TURN 1    TEAM A TO PLAY" );
+        assert( gui_game_n() == 0 );
         PREVIEW_BLANK();
     }
 

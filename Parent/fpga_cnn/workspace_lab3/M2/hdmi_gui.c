@@ -134,6 +134,23 @@ static int        last_valid;
 static int s_auto;
 static int s_rows, s_cols;
 
+/* KEY1 after a whole-grid scan: the board as it was before the latest scan (or
+ * clear), one level -- a tap brings that result back, e.g. the 3x3 after a bad
+ * 4x4 scan (30 Sep). The undo ring above is for guided one-card reads. */
+static struct { struct grid g; struct det last; int last_valid, rows, cols; } scan_prev;
+static int scan_prev_ok;
+
+static void scan_keep( void )
+{
+    if( !s_auto || ( g.mode == GRID_SCAN && !g.n_read ) ) return;   /* nothing scanned to keep */
+    scan_prev.g          = g;
+    scan_prev.last       = last;
+    scan_prev.last_valid = last_valid;
+    scan_prev.rows       = s_rows;
+    scan_prev.cols       = s_cols;
+    scan_prev_ok         = 1;
+}
+
 static void cell_label( int i, char * buf, unsigned n )
 {
     if( s_auto ) snprintf( buf, n, "(%d,%d)", i / g.n + 1, i % g.n + 1 );
@@ -341,7 +358,8 @@ static void draw_board( void )
     fill( GRID_ROW, GRID_COL, ROWS - 2, COLS - 1 - GRID_COL, ' ', INK, FELT );
     put( 1, COLS - 2, CH_LOWER, FELT, WOOD );           /* the felt's rounded corners */
     put( ROWS - 2, COLS - 2, CH_UPPER, FELT, WOOD );
-    if( s_auto ) snprintf( buf, sizeof buf, " GRID SCAN %d x %d ", s_rows, s_cols );
+    if( s_auto && g.mode == GRID_GAME ) snprintf( buf, sizeof buf, " FACE-DOWN GAME %d x %d ", s_rows, s_cols );
+    else if( s_auto ) snprintf( buf, sizeof buf, " GRID SCAN %d x %d ", s_rows, s_cols );
     else         snprintf( buf, sizeof buf, " %s %dx%d ", g.mode == GRID_SCAN ? "FACE-UP" : "FACE-DOWN GAME", g.n, g.n );
     text( GRID_ROW, GRID_COL + 1, 0, buf, GUI_BLACK, BRASS );
     for( i = 0; i < g.n; i++ ) {
@@ -372,8 +390,12 @@ static void draw_info( void )
         if( g.target >= 0 ) snprintf( buf, sizeof buf, " NEXT: %s - show it at the box, KEY0", a );
         else                snprintf( buf, sizeof buf, " SCAN DONE - %u PAIR%s FOUND", g.pairs, g.pairs == 1 ? "" : "S" );
     }
+    else if( grid_left( &g ) <= 1 && g.players == 1 )
+        snprintf( buf, sizeof buf, " GAME OVER - %u PAIR%s IN %u TURNS", g.pairs, g.pairs == 1 ? "" : "S", g.turn - 1u );
     else if( grid_left( &g ) <= 1 )
         snprintf( buf, sizeof buf, " GAME OVER - A %u : B %u", g.score[ 0 ], g.score[ 1 ] );
+    else if( g.players == 1 )
+        snprintf( buf, sizeof buf, " TURN %u: turn 2 cards up, KEY0", g.turn );
     else if( g.target >= 0 ) {
         grid_cell_name( &g, g.target, a );
         snprintf( buf, sizeof buf, " TEAM %c: turn up %s, show it, KEY0", 'A' + g.team, a );
@@ -400,6 +422,19 @@ static void draw_info( void )
                 text( row + ( k - 1 ) % 6, INFO_COL + ( k - 1 ) / 6 * 20, 19, buf, GUI_BLACK, BRASS );
                 break;
             }
+        }
+    }
+    else if( g.players == 1 ) {
+        snprintf( buf, sizeof buf, "TURN %u    PAIRS %u", g.turn, g.pairs );
+        text( row++, INFO_COL, INFO_W, buf, INK, FELT );
+        snprintf( buf, sizeof buf, "LEFT    %d of %d cards", grid_left( &g ), cells );
+        text( row++, INFO_COL, INFO_W, buf, INK, FELT );
+        if( g.outcome != OUT_NONE && g.n_open == 2 ) {
+            cell_label( g.open[ 0 ], a, sizeof a );
+            cell_label( g.open[ 1 ], b, sizeof b );
+            snprintf( buf, sizeof buf, g.outcome == OUT_MATCH ? " PAIR  %s+%s" : " NO PAIR  %s+%s - turn them back",
+                      a, b );
+            text( ++row, INFO_COL, 0, buf, GUI_BLACK, g.outcome == OUT_MATCH ? BRASS : GUI_WHITE );
         }
     }
     else {
@@ -465,9 +500,11 @@ static void new_board( int n, int mode )
 void gui_init( void )
 {
     static const struct { const char * key, * what; } HELP[] = {
-        { "KEY0", "read" }, { "KEY1", "undo/hold:new" }, { "SW0", "ascii" }, { "SW1", "pgm" },
+        { "KEY0", "read" }, { "KEY1", "undo/hold:new" },
 #if RTOS_MODE
-        { "SW2", "3x3" }, { "SW3", "auto" }, { "UART", "h" },
+        { "SW0", "turn" }, { "SW1", "save" }, { "SW2", "game" }, { "SW3", "auto" }, { "UART", "h" },
+#else
+        { "SW0", "ascii" }, { "SW1", "pgm" },
 #endif
     };
     unsigned k;
@@ -485,7 +522,7 @@ void gui_init( void )
     put( HINT_ROW, 1, CH_LOWER, FELT, WOOD );           /* under the camera */
     put( ROWS - 2, 1, CH_UPPER, FELT, WOOD );
 
-    col = text( 0, 2, 0, "\x06\x03 ECE4813  CARD TABLE \x05\x04", BRASS, WOOD );
+    col = text( 0, 2, 0, "\x06\x03 RAMA'S GAME OF POKER \x05\x04", BRASS, WOOD );
     text( 0, col + 2, 0, "DE10-Nano CNN", INK, WOOD );
 
     /* the camera, set into the rail: wood with a brass pinstripe round the preview */
@@ -561,6 +598,21 @@ void gui_undo( void )
 {
     char msg[ 24 ], cell[ 3 ];
 
+    if( s_auto ) {                              /* a scanned board: back to the one before */
+        if( !scan_prev_ok ) {
+            gui_status( "NOTHING TO UNDO", GUI_YELLOW );
+            return;
+        }
+        g            = scan_prev.g;
+        last         = scan_prev.last;
+        last_valid   = scan_prev.last_valid;
+        s_rows       = scan_prev.rows;
+        s_cols       = scan_prev.cols;
+        scan_prev_ok = 0;
+        redraw();
+        gui_status( g.mode == GRID_GAME ? "UNDID LAST TURN" : "UNDID LAST SCAN", GUI_YELLOW );
+        return;
+    }
     if( !n_undo ) {
         gui_status( "NOTHING TO UNDO", GUI_YELLOW );
         return;
@@ -577,7 +629,14 @@ void gui_undo( void )
 
 void gui_clear( void )
 {
+    int players = g.players;
+
+    scan_keep();                                /* a tap brings a cleared scan back */
     new_board( g.n, g.mode );
+    if( g.mode == GRID_GAME && players == 1 ) { /* the camera game stays one-player */
+        g.players = 1;
+        redraw();
+    }
 }
 
 int gui_command( const char * cmd )
@@ -621,6 +680,7 @@ void gui_scan_begin( const struct scan_result * s )
     char msg[ 28 ];
     int  n = ( int ) ( s->nrows > s->ncols ? s->nrows : s->ncols );
 
+    scan_keep();                                /* KEY1 can bring the last result back */
     s_auto = 1;
     s_rows = ( int ) s->nrows;
     s_cols = ( int ) s->ncols;
@@ -692,42 +752,87 @@ void gui_mode( int auto_scan, const char * orient_name )
     }
 }
 
-/* The green box (camera_capture.v: preview at PV_X 8, PV_Y 32; box at screen
- * x 72..263, y 56..247) cut into thirds with CP437 line glyphs. From the font:
- * the horizontal stroke is scanline 7 of a cell and the vertical stroke pixel
- * columns 3-4, so
- *   rows 7 and 11      put the horizontal lines on y 119 and 183 (thirds: 120,
- *                      184), across columns 9-32 = exactly x 72..263;
- *   columns 17 and 25  put the vertical lines on x 139.5 and 203.5, 3.5 px
- *                      right of the thirds (136, 200) -- the text grid is 8 px
- *                      -- with the middle column exactly a third wide; they
- *                      run rows 4-14, with T-joins in rows 3 and 15 landing on
- *                      the box's top (y 55) and bottom (y 247) edges.
- * Off writes ' ' back to the same cells: blank cells are transparent. */
-#define GG_ROW_TOP      3
-#define GG_ROW_BOT      15
-#define GG_COL_L        9
-#define GG_COL_R        32
-#define CH_GG_V         0xB3u       /* vertical line */
-#define CH_GG_H         0xC4u       /* horizontal line */
-#define CH_GG_X         0xC5u       /* crossing */
-#define CH_GG_T         0xC2u       /* T down: joins the box's top edge */
-#define CH_GG_B         0xC1u       /* T up: joins its bottom edge */
-
-void gui_guide_grid( int on )
+/* ---- face-down game, camera-driven (SW2) ----------------------------------
+ * The board comes from a scan with every card face down; each turn the camera
+ * finds the two cards turned up and gui_game_turn() judges them with grid.c's
+ * rules. One player: pairs and turns are counted, no teams. Found pairs stay
+ * face up where they lie, and the camera skips their cells (gui_game_matched). */
+static void short_card( uint32_t r, char * buf, unsigned n )    /* "7H", "10S", "JK" */
 {
-    static const int ROW[ 2 ] = { 7, 11 }, COL[ 2 ] = { 17, 25 };
-    int r, c, k;
+    static const char SUIT_CH[ 4 ] = { 'S', 'C', 'H', 'D' };
 
-    for( k = 0; k < 2; k++ ) {
-        for( c = GG_COL_L; c <= GG_COL_R; c++ ) {                  /* horizontal lines */
-            int x = c == COL[ 0 ] || c == COL[ 1 ];
-            put( ROW[ k ], c, on ? ( x ? CH_GG_X : CH_GG_H ) : ' ', GUI_LGREEN, FELT );
-        }
-        for( r = GG_ROW_TOP; r <= GG_ROW_BOT; r++ ) {              /* vertical lines */
-            unsigned ch = r == GG_ROW_TOP ? CH_GG_T : r == GG_ROW_BOT ? CH_GG_B :
-                          ( r == ROW[ 0 ] || r == ROW[ 1 ] ) ? CH_GG_X : CH_GG_V;
-            put( r, COL[ k ], on ? ch : ' ', GUI_LGREEN, FELT );
-        }
+    if( RES_JOKER( r ) ) snprintf( buf, n, "JK" );
+    else                 snprintf( buf, n, "%s%c", RANK_NAMES[ RES_RANK( r ) ], SUIT_CH[ RES_SUIT( r ) ] );
+}
+
+void gui_game_begin( int n )
+{
+    char msg[ 24 ];
+
+    scan_keep();                                /* KEY1 can bring the last scan back */
+    s_auto = 1;
+    s_rows = s_cols = n;
+    new_board( n, GRID_GAME );
+    g.players = 1;
+    redraw();
+    snprintf( msg, sizeof msg, "GAME %dx%d READY", g.n, g.n );
+    gui_status( msg, GUI_LGREEN );
+}
+
+int gui_game_turn( unsigned r1, unsigned c1, uint32_t w1, unsigned r2, unsigned c2, uint32_t w2, unsigned shot )
+{
+    char        msg[ 40 ], a[ 8 ], b[ 8 ], n1[ 8 ], n2[ 8 ];
+    int         k1, k2;
+    struct grid before = g;
+
+    if( g.mode != GRID_GAME || !s_auto || !r1 || !c1 || !r2 || !c2 ||
+        r1 > g.n || c1 > g.n || r2 > g.n || c2 > g.n ) return OUT_NONE;
+    k1 = ( int ) ( ( r1 - 1 ) * g.n + ( c1 - 1 ) );
+    k2 = ( int ) ( ( r2 - 1 ) * g.n + ( c2 - 1 ) );
+    if( !grid_target( &g, k1 ) || grid_read( &g, w1, shot ) != GRID_OPENED ||
+        !grid_target( &g, k2 ) || grid_read( &g, w2, shot ) != GRID_JUDGED ) {
+        g = before;                             /* a found pair's cell, or one cell twice: nothing happened */
+        gui_status( "NOT FACE-DOWN CELLS", GUI_LRED );
+        return OUT_NONE;
     }
+    scan_prev.g          = before;              /* KEY1 tap undoes this turn */
+    scan_prev.last       = last;
+    scan_prev.last_valid = last_valid;
+    scan_prev.rows       = s_rows;
+    scan_prev.cols       = s_cols;
+    scan_prev_ok         = 1;
+    last.result = w2;
+    last.shot   = shot;
+    last.where  = NULL;
+    last.placed = k2;
+    last_valid  = 1;
+    redraw();
+    cell_label( k1, a, sizeof a );
+    cell_label( k2, b, sizeof b );
+    short_card( w1, n1, sizeof n1 );
+    short_card( w2, n2, sizeof n2 );
+    snprintf( msg, sizeof msg, "%s %s%s %s%s", g.outcome == OUT_MATCH ? "PAIR!" : "NO PAIR", n1, a, n2, b );
+    gui_status( msg, g.outcome == OUT_MATCH ? GUI_LGREEN : GUI_YELLOW );
+    return g.outcome;
+}
+
+void gui_game_note( const char * msg )
+{
+    gui_status( msg, GUI_YELLOW );
+}
+
+int gui_game_n( void )
+{
+    return s_auto && g.mode == GRID_GAME ? g.n : 0;
+}
+
+uint32_t gui_game_matched( void )
+{
+    uint32_t m = 0;
+    int      i;
+
+    if( !gui_game_n() ) return 0;
+    for( i = 0; i < g.n * g.n; i++ )
+        if( g.cell[ i ].state == CELL_MATCHED ) m |= 1u << ( ( i / g.n ) * GRID_MAX + i % g.n );
+    return m;
 }

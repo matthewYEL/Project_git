@@ -12,6 +12,8 @@
 #define RED_PER     16                          /* red when red samples x 16 > samples */
 #define INDEX_NU    12                          /* samples per index corner, short side */
 #define INDEX_NV    20                          /* ... and long side */
+#define UP_DROP     30                          /* face_up: paper = within 30 of the border's white */
+#define UP_PCT      19                          /* ... face up when >= 19 % of the middle is paper */
 
 /* Where the index sits: (u0, v0, u1, v1) percent of the card's short and long
  * side from a corner, along the card's own edges (locate.py INDEX_BOX_PCT) */
@@ -144,10 +146,28 @@ static void sort_ints( long * v, int n )            /* insertion sort, ascending
     }
 }
 
+/* floor( sqrt( v ) ) for v >= 0, as Python's math.isqrt */
+static int64_t isqrt64( int64_t v )
+{
+    int64_t r = 0, bit = ( int64_t ) 1 << 62;
+
+    while( bit > v ) bit >>= 2;
+    while( bit ) {
+        if( v >= r + bit ) {
+            v -= r + bit;
+            r  = ( r >> 1 ) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    return r;
+}
+
 /* Group index of each value, split where sorted values jump by more than gap2
  * (values and gap both doubled, so the half-pixel centres stay integers).
  * Stable: equal values keep their input order, as Python's sorted() does. */
-static int cluster( const long * v, int n, long gap2, uint8_t * idx )
+static int cluster( const int64_t * v, int n, int64_t gap2, uint8_t * idx )
 {
     int order[ SCAN_MAX ], i, j, g = 0;
 
@@ -164,9 +184,14 @@ static int cluster( const long * v, int n, long gap2, uint8_t * idx )
     return g + 1;
 }
 
-static void assign_grid( struct scan_result * out, unsigned orient )
+/* Rows and columns from the gaps between the centres, first turned by the
+ * grid's own direction (dx, dy) = the sum of the cards' top edges, TR - TL, so
+ * a grid held at a slant still falls into clean rows and columns -- locate.py
+ * assign_grid. Unnormalised, so the gaps are scaled by isqrt(|d|^2) to match. */
+static void assign_grid( struct scan_result * out, unsigned orient, int64_t dx, int64_t dy )
 {
-    long     ra[ SCAN_MAX ], ca[ SCAN_MAX ], er[ SCAN_MAX ], ec[ SCAN_MAX ];
+    int64_t  ra[ SCAN_MAX ], ca[ SCAN_MAX ], norm;
+    long     er[ SCAN_MAX ], ec[ SCAN_MAX ];
     uint8_t  ri[ SCAN_MAX ], ci[ SCAN_MAX ];
     int      i, n = ( int ) out->n, nr, nc, swap = ( orient & ORIENT_SWAP ) != 0;
 
@@ -174,20 +199,23 @@ static void assign_grid( struct scan_result * out, unsigned orient )
         out->nrows = out->ncols = 0;
         return;
     }
+    if( !dx && !dy ) dx = 1;
+    norm = isqrt64( dx * dx + dy * dy );
     for( i = 0; i < n; i++ ) {
         const struct scan_card * c = &out->card[ i ];
-        long sx = c->x0 + c->x1, sy = c->y0 + c->y1;         /* doubled centres */
-        long w  = c->x1 - c->x0 + 1, h = c->y1 - c->y0 + 1;
+        int64_t sx = c->x0 + c->x1, sy = c->y0 + c->y1;      /* doubled centres */
+        int64_t tx = sx * dx + sy * dy, ty = sy * dx - sx * dy;
+        long    w  = c->x1 - c->x0 + 1, h = c->y1 - c->y0 + 1;
 
-        ra[ i ] = swap ? sx : sy;
-        ca[ i ] = swap ? sy : sx;
+        ra[ i ] = swap ? tx : ty;
+        ca[ i ] = swap ? ty : tx;
         er[ i ] = swap ? w : h;
         ec[ i ] = swap ? h : w;
     }
     sort_ints( er, n );
     sort_ints( ec, n );
-    nr = cluster( ra, n, er[ n / 2 ], ri );                  /* gap: half the median extent */
-    nc = cluster( ca, n, ec[ n / 2 ], ci );
+    nr = cluster( ra, n, er[ n / 2 ] * norm, ri );           /* gap: half the median extent */
+    nc = cluster( ca, n, ec[ n / 2 ] * norm, ci );
     for( i = 0; i < n; i++ ) {
         out->card[ i ].row = ( uint8_t ) ( ( orient & ORIENT_FLIP_R ) ? nr - ri[ i ] : ri[ i ] + 1 );
         out->card[ i ].col = ( uint8_t ) ( ( orient & ORIENT_FLIP_C ) ? nc - ci[ i ] : ci[ i ] + 1 );
@@ -217,36 +245,73 @@ static void frame_corners( const struct box * b, int fw, int fh, struct pt f[ 4 
  * index_samples. Top-left and bottom-right of a portrait card, top-right and
  * bottom-left of one lying sideways. Only the indices: court artwork is red
  * and gold whatever the suit. */
+/* Sample (i, j) of an nu x nv patch box = { u0, v0, u1, v1 } percent, laid from
+ * corner c along the card's own edges to a (u, the short side) and b (v, the
+ * long side), nearest pixel -- locate.py _patch. 0 if it falls off the frame. */
+static int patch_point( struct pt c, struct pt a, struct pt b, const int box[ 4 ], int nu, int nv,
+                        int i, int j, int fw, int fh, struct pt * p )
+{
+    const long d  = 100L * ( nu - 1 ) * ( nv - 1 );
+    long       fu = ( long ) ( box[ 0 ] * ( nu - 1 ) + ( box[ 2 ] - box[ 0 ] ) * i ) * ( nv - 1 );
+    long       fv = ( long ) ( box[ 1 ] * ( nv - 1 ) + ( box[ 3 ] - box[ 1 ] ) * j ) * ( nu - 1 );
+    long       nx = fu * ( a.x - c.x ) + fv * ( b.x - c.x );
+    long       ny = fu * ( a.y - c.y ) + fv * ( b.y - c.y );
+
+    p->x = c.x + ( int ) fdiv( 2 * nx + d, 2 * d );
+    p->y = c.y + ( int ) fdiv( 2 * ny + d, 2 * d );
+    return p->x >= 0 && p->x < fw && p->y >= 0 && p->y < fh;
+}
+
 static int index_red( const struct pt f[ 4 ], int landscape, int fw, int fh )
 {
     /* corner, its neighbour along the short side, along the long side */
     static const uint8_t PORTRAIT[ 2 ][ 3 ] = { { 0, 1, 2 }, { 3, 2, 1 } };
     static const uint8_t SIDEWAYS[ 2 ][ 3 ] = { { 1, 3, 0 }, { 2, 0, 3 } };
     const uint8_t ( *patch )[ 3 ] = landscape ? SIDEWAYS : PORTRAIT;
-    const long d = 100L * ( INDEX_NU - 1 ) * ( INDEX_NV - 1 );
     long n = 0, m = 0;
     int  k, i, j;
 
     for( k = 0; k < 2; k++ ) {
-        struct pt c = f[ patch[ k ][ 0 ] ], a = f[ patch[ k ][ 1 ] ], b = f[ patch[ k ][ 2 ] ];
+        struct pt c = f[ patch[ k ][ 0 ] ], a = f[ patch[ k ][ 1 ] ], b = f[ patch[ k ][ 2 ] ], p;
 
-        for( i = 0; i < INDEX_NU; i++ ) {
-            long fu = ( long ) ( IDX[ 0 ] * ( INDEX_NU - 1 ) + ( IDX[ 2 ] - IDX[ 0 ] ) * i ) * ( INDEX_NV - 1 );
-
+        for( i = 0; i < INDEX_NU; i++ )
             for( j = 0; j < INDEX_NV; j++ ) {
-                long fv = ( long ) ( IDX[ 1 ] * ( INDEX_NV - 1 ) + ( IDX[ 3 ] - IDX[ 1 ] ) * j ) * ( INDEX_NU - 1 );
-                long nx = fu * ( a.x - c.x ) + fv * ( b.x - c.x );
-                long ny = fu * ( a.y - c.y ) + fv * ( b.y - c.y );
-                int  x  = c.x + ( int ) fdiv( 2 * nx + d, 2 * d );
-                int  y  = c.y + ( int ) fdiv( 2 * ny + d, 2 * d );
-
-                if( x < 0 || x >= fw || y < 0 || y >= fh ) continue;
+                if( !patch_point( c, a, b, IDX, INDEX_NU, INDEX_NV, i, j, fw, fh, &p ) ) continue;
                 m++;
-                n += PIX_RED( snap_read( FRAME_ADDR( y, x ) ) );
+                n += PIX_RED( snap_read( FRAME_ADDR( p.y, p.x ) ) );
             }
-        }
     }
     return n * RED_PER > m;
+}
+
+/* Face up? A face is mostly paper-white in the middle; a back (a black pattern
+ * inside a white border, 30 Sep) blurs to grey at D8M sharpness. White is the
+ * card's own border strip, so dim light doesn't matter: face up when UP_PCT %
+ * of the middle is within UP_DROP of the strip's median -- locate.py face_up. */
+static int face_up( const struct pt f[ 4 ], int landscape, int fw, int fh )
+{
+    static const int BORDER[ 4 ] = { 1, 10, 4, 90 }, CENTRE[ 4 ] = { 15, 12, 85, 88 };
+    struct pt c = f[ landscape ? 1 : 0 ], a = f[ landscape ? 3 : 1 ], b = f[ landscape ? 0 : 2 ], p;
+    int       v[ 4 * 16 ], nb = 0, n = 0, paper = 0, white, i, j, k;
+
+    for( i = 0; i < 4; i++ )
+        for( j = 0; j < 16; j++ )
+            if( patch_point( c, a, b, BORDER, 4, 16, i, j, fw, fh, &p ) )
+                v[ nb++ ] = ( int ) PIX_GRAY( snap_read( FRAME_ADDR( p.y, p.x ) ) );
+    if( !nb ) return 1;
+    for( i = 1; i < nb; i++ ) {                              /* insertion sort, ascending */
+        int x = v[ i ];
+        for( k = i; k > 0 && v[ k - 1 ] > x; k-- ) v[ k ] = v[ k - 1 ];
+        v[ k ] = x;
+    }
+    white = ( v[ ( nb - 1 ) / 2 ] + v[ nb / 2 ] ) / 2;
+    for( i = 0; i < 12; i++ )
+        for( j = 0; j < 16; j++ )
+            if( patch_point( c, a, b, CENTRE, 12, 16, i, j, fw, fh, &p ) ) {
+                n++;
+                paper += ( int ) PIX_GRAY( snap_read( FRAME_ADDR( p.y, p.x ) ) ) >= white - UP_DROP;
+            }
+    return !n || paper * 100 >= UP_PCT * n;
 }
 
 unsigned locate_cards( struct scan_result * out, unsigned orient, int fw, int fh )
@@ -255,6 +320,7 @@ unsigned locate_cards( struct scan_result * out, unsigned orient, int fw, int fh
     long     areas[ MAX_CAND ], ws[ MAX_CAND ], hs[ MAX_CAND ];
     int      sw = ( fw + STEP - 1 ) / STEP, sh = ( fh + STEP - 1 ) / STEP;
     int      x, y, i, j, n_cand = 0, n_shaped = 0, n_cards = 0;
+    int64_t  dx = 0, dy = 0;                    /* the grid's direction: sum of top edges */
     unsigned thr;
 
     memset( out, 0, sizeof *out );
@@ -395,11 +461,14 @@ unsigned locate_cards( struct scan_result * out, unsigned orient, int fw, int fh
             s->y1 = ( uint16_t ) MIN( fh - 1, c->y1 * STEP + STEP - 1 );
             frame_corners( c, fw, fh, f );
             s->red = ( uint8_t ) index_red( f, s->x1 - s->x0 > s->y1 - s->y0, fw, fh );
+            s->up  = ( uint8_t ) face_up( f, s->x1 - s->x0 > s->y1 - s->y0, fw, fh );
+            dx += f[ 1 ].x - f[ 0 ].x;
+            dy += f[ 1 ].y - f[ 0 ].y;
         }
     }
 
     /* 5: rows and columns, then (row, col) order */
-    assign_grid( out, orient );
+    assign_grid( out, orient, dx, dy );
     for( i = 1; i < ( int ) out->n; i++ ) {
         struct scan_card c = out->card[ i ];
         for( j = i; j > 0 && ( out->card[ j - 1 ].row > c.row ||

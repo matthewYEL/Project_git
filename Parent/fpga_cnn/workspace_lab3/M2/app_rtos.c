@@ -20,16 +20,17 @@
  *                     KEY1_CLEAR_MS clears them all.
  *     prio 2  Vision  hands the job to CPU1 and sleeps until it is done (or runs
  *                     it on CPU0 if CPU1 never came up / stops answering).
- *     prio 1  Report  the only task that prints: result line, ASCII preview
- *                     (SW0), PGM dump (SW1), run-time statistics (every
- *                     STATS_EVERY results), the SW2 guide grid on HDMI.
+ *     prio 1  Report  the only task that prints: result line, the picture
+ *                     kept for Arm DS (SW1, pics.h),
+ *                     run-time statistics (every
+ *                     STATS_EVERY results), the SW2 face-down game.
  *                     Lowest priority on purpose:
  *                     semihosted printf is slow and nothing else waits on it.
  *                     Also the only task that draws the HDMI dashboard
  *                     (hdmi_gui.c) -- a cell is a 3-access sequence that must
  *                     not interleave -- and it draws before it prints.
  *
- * FPGA ownership: the PGM dump and the camera diagnostics read the image RAM
+ * FPGA ownership: the SW1 picture copy and the camera diagnostics read the image RAM
  * from CPU0, which is only safe with no job in flight. So Vision takes the next
  * job only after Report has finished with the current one (task notification).
  *
@@ -48,6 +49,8 @@
 #include "hdmi_gui.h"
 #include "amp.h"
 #include "locate.h"
+#include "pics.h"
+#include "grid.h"
 
 extern void     vInstallVectorTable( void );
 extern void     vInitialiseGIC( void );
@@ -75,7 +78,12 @@ struct job_req
 /* Only REPORT_RESULT is answered with the notification Vision waits on. */
 enum { REPORT_RESULT, REPORT_BUSY, REPORT_JOB_START, REPORT_UNDO, REPORT_CLEAR, REPORT_CMD,
        REPORT_SCAN_FOUND, REPORT_SCAN_CARD, REPORT_SCAN_DONE, REPORT_SCAN_FAIL,
-       REPORT_GRID };                           /* SW2 moved: shot = 1 on, 0 off */
+       REPORT_GAME_SW,                          /* SW2 moved: shot = 1 game on, 0 off */
+       REPORT_TURN,                             /* SW0 moved: shot = 1 camera turned, 0 not */
+       REPORT_GAME_BOARD,                       /* game: the snapshot that sets the board up */
+       REPORT_GAME_TURN,                        /* game: xScan cards idx and aux are the two up */
+       REPORT_GAME_NOTE };                      /* game: idx = GAME_BAD_GRID / GAME_NOT_TWO, aux = count */
+enum { GAME_BAD_GRID = 1, GAME_NOT_TWO };
 /* A scan answers with the notification Vision waits on at SCAN_DONE / SCAN_FAIL. */
 
 #define CMD_MAX         8                   /* an operator command line, NUL included */
@@ -121,10 +129,35 @@ static const struct { unsigned bits; const char * name; } ORIENTS[] = {
 };
 #define N_ORIENTS   ( sizeof ORIENTS / sizeof ORIENTS[ 0 ] )
 
+/* SW0 in this app: the camera is turned 90 deg clockwise, ORIENTS[ 1 ] -- for a
+ * 4x4, whose four rows then run along the frame's 512 px, not its 384 (cards
+ * ~82 px wide instead of ~61). Up, it overrides UART o. SW0's old job, the
+ * ASCII preview, went out over the UART, which the demo no longer has (30 Sep). */
+#define SW_TURN         SW_PREVIEW
+#define ORIENT_TURNED   1u
+
+/* The orientation the next scan uses: SW0 up = turned, else the o setting */
+static unsigned prvOrient( void )
+{
+    return ( read_switches() & SW_TURN ) ? ORIENT_TURNED : uOrientIdx;
+}
+
+/* ... and the one the running scan uses, from SW0 as it was at KEY0: set by
+ * prvScan before it locates, read by prvReadCard and by Report's header line */
+static volatile unsigned uScanOrient = SCAN_ORIENT_DEFAULT;
+
 /* The scan in progress: written by Vision, read by Report through the card
  * index in each message. Vision starts the next job only after Report has
  * answered SCAN_DONE, so neither changes under the other. */
 static struct scan_result xScan;
+
+/* The face-down game (SW2): written by Report only, read by Vision between
+ * jobs (Vision takes the next job only after Report's answer). uGameN is the
+ * board's n, 0 = none yet -- the next KEY0 sets it up; ulGameMatched holds the
+ * found pairs' cells, bit (row-1)*GRID_MAX + col-1: they stay face up where
+ * they lie, and the camera skips them. */
+static volatile unsigned uGameN;
+static volatile uint32_t ulGameMatched;
 static uint32_t           xScanWord[ SCAN_MAX ];    /* each card's final read */
 static uint8_t            xScanReads[ SCAN_MAX ];   /* windows read: SCAN_READS, all 7 for a duplicate */
 static uint8_t            xScanAgree[ SCAN_MAX ];   /* of them, how many gave the answer */
@@ -192,7 +225,8 @@ static void prvInputTask( void * pvParameters )
     int        iKey1Timing = 0;
     char       acLine[ CMD_MAX ];
     unsigned   uLineLen    = 0;
-    unsigned   uLastGrid   = ~0u;           /* SW2 as last shown; ~0 = not yet */
+    unsigned   uLastGame   = ~0u;           /* SW2 as last shown; ~0 = not yet */
+    unsigned   uLastTurn   = ~0u;           /* SW0 as last shown; ~0 = not yet */
 
     ( void ) pvParameters;
 
@@ -207,22 +241,36 @@ static void prvInputTask( void * pvParameters )
         int      iAuto    = ( uSw & SW_AUTO ) && !xJobInFlight &&
                             ( xTaskGetTickCount() - xLastIssued ) >= pdMS_TO_TICKS( AUTO_PERIOD_MS );
 
-        /* SW2: the guide grid, drawn by Report (the text layer's one writer).
-         * Only marked shown once the message is queued, so a full queue just
-         * means another try on the next poll. */
-        if( ( uSw & SW_GRID ) != uLastGrid )
+        /* SW2: the face-down game on or off -- Report starts a new game each
+         * time it goes up (the text layer's one writer). Only marked shown once
+         * the message is queued, so a full queue just means another try on the
+         * next poll. */
+        if( ( uSw & SW_GAME ) != uLastGame )
         {
-            struct report_msg xMsg = { REPORT_GRID, 0, 0, ( uSw & SW_GRID ) ? 1u : 0u, 0, NULL, { 0 }, 0, 0 };
+            struct report_msg xMsg = { REPORT_GAME_SW, 0, 0, ( uSw & SW_GAME ) ? 1u : 0u, 0, NULL, { 0 }, 0, 0 };
 
             if( xQueueSend( xReports, &xMsg, 0 ) == pdPASS )
             {
-                uLastGrid = uSw & SW_GRID;
+                uLastGame = uSw & SW_GAME;
+            }
+        }
+
+        /* SW0: the camera turned or not, shown in the HDMI hint the same way */
+        if( ( uSw & SW_TURN ) != uLastTurn )
+        {
+            struct report_msg xMsg = { REPORT_TURN, 0, 0, ( uSw & SW_TURN ) ? 1u : 0u, 0, NULL, { 0 }, 0, 0 };
+
+            if( xQueueSend( xReports, &xMsg, 0 ) == pdPASS )
+            {
+                uLastTurn = uSw & SW_TURN;
             }
         }
 
         /* KEY1: released before KEY1_CLEAR_MS = undo, still down then = clear.
          * The level is only sampled here, so a press already over by the time
-         * it is seen (e.g. made during a printf halt) counts as a tap. */
+         * it is seen (e.g. made during a printf halt) counts as a tap. While a
+         * job runs the board belongs to it: KEY1 only says busy, so an undo
+         * can never swap boards under a scan in progress. */
         if( uPressed & KEY_UNDO )
         {
             iKey1Timing = 1;
@@ -230,12 +278,14 @@ static void prvInputTask( void * pvParameters )
         }
         if( iKey1Timing && !( keys_held() & KEY_UNDO ) )
         {
-            prvPost( REPORT_UNDO, 0, 0 );
+            if( xJobInFlight ) prvPost( REPORT_BUSY, ulShot - 1u, 0 );
+            else               prvPost( REPORT_UNDO, 0, 0 );
             iKey1Timing = 0;
         }
         else if( iKey1Timing && ( xTaskGetTickCount() - xKey1Down ) >= pdMS_TO_TICKS( KEY1_CLEAR_MS ) )
         {
-            prvPost( REPORT_CLEAR, 0, 0 );
+            if( xJobInFlight ) prvPost( REPORT_BUSY, ulShot - 1u, 0 );
+            else               prvPost( REPORT_CLEAR, 0, 0 );
             iKey1Timing = 0;
         }
         uPressed &= KEY_CAPTURE;
@@ -349,7 +399,7 @@ static uint32_t prvReadCard( const struct scan_card * c, unsigned uReads, uint8_
 
     if( uReads < 1u ) uReads = 1u;
     if( uReads > N_VARIANTS ) uReads = N_VARIANTS;
-    window_for_card( c, ORIENTS[ uOrientIdx ].bits, FRAME_W, FRAME_H, &w );
+    window_for_card( c, ORIENTS[ uScanOrient ].bits, FRAME_W, FRAME_H, &w );
     for( k = 0; k < uReads; k++ )
     {
         v = w;
@@ -419,8 +469,9 @@ static void prvScan( const struct job_req * pxReq )
         return;
     }
 
+    uScanOrient = ( pxReq->sw & SW_TURN ) ? ORIENT_TURNED : uOrientIdx;
     xCmd.kind   = VJOB_LOCATE;
-    xCmd.orient = ORIENTS[ uOrientIdx ].bits;
+    xCmd.orient = ORIENTS[ uScanOrient ].bits;
     pxRes = prvJob( &xCmd, &ucOn1 );
     xScan = pxRes->scan;
     prvPostScan( REPORT_SCAN_FOUND, pxReq, 0, pxRes->inf_us );
@@ -456,6 +507,62 @@ static void prvScan( const struct job_req * pxReq )
     prvPostScan( REPORT_SCAN_DONE, pxReq, 0, 0 );
 }
 
+/* The face-down game (SW2), one KEY0: one snapshot and the cards found. The
+ * first one of a game only sets the board up (Report checks every card is face
+ * down); after that the two cards turned up -- face up, and not on a found
+ * pair's cell -- are read (the same 5-read vote) and Report judges them. Report
+ * answers the final GAME_* / SCAN_FAIL message with the notification. */
+static void prvGameTurn( const struct job_req * pxReq )
+{
+    struct vision_job              xCmd = { VJOB_CAPTURE, 0, 0 };
+    const struct vision_result *   pxRes;
+    uint8_t                        ucOn1;
+    unsigned                       i, n = uGameN, nUp = 0, aUp[ 2 ] = { 0, 0 };
+
+    pxRes = prvJob( &xCmd, &ucOn1 );
+    if( pxRes->status != VIS_OK || pxRes->maxv == 0u )
+    {
+        prvPostScan( REPORT_SCAN_FAIL, pxReq, 0, pxRes->status == VIS_OK ? 0xFFu : pxRes->status );
+        return;
+    }
+    uScanOrient = ( pxReq->sw & SW_TURN ) ? ORIENT_TURNED : uOrientIdx;
+    xCmd.kind   = VJOB_LOCATE;
+    xCmd.orient = ORIENTS[ uScanOrient ].bits;
+    pxRes = prvJob( &xCmd, &ucOn1 );
+    xScan = pxRes->scan;
+
+    if( !n )
+    {
+        prvPostScan( REPORT_GAME_BOARD, pxReq, 0, 0 );
+        return;
+    }
+    if( xScan.nrows != n || xScan.ncols != n || xScan.n != n * n )
+    {
+        prvPostScan( REPORT_GAME_NOTE, pxReq, GAME_BAD_GRID, xScan.n );
+        return;
+    }
+    for( i = 0; i < xScan.n; i++ )          /* in (row, col) order */
+    {
+        const struct scan_card * c = &xScan.card[ i ];
+
+        if( !c->up || ( ( ulGameMatched >> ( ( c->row - 1u ) * GRID_MAX + c->col - 1u ) ) & 1u ) ) continue;
+        if( nUp < 2 ) aUp[ nUp ] = i;
+        nUp++;
+    }
+    if( nUp != 2 )
+    {
+        prvPostScan( REPORT_GAME_NOTE, pxReq, GAME_NOT_TWO, nUp );
+        return;
+    }
+    for( i = 0; i < 2; i++ )
+    {
+        xScanWord[ aUp[ i ] ] = prvReadCard( &xScan.card[ aUp[ i ] ], SCAN_READS,
+                                             &xScanReads[ aUp[ i ] ], &xScanAgree[ aUp[ i ] ] );
+    }
+    win_write( &xGuideWin );                /* guided reads use the old crop again */
+    prvPostScan( REPORT_GAME_TURN, pxReq, ( uint8_t ) aUp[ 0 ], aUp[ 1 ] );
+}
+
 static void prvVisionTask( void * pvParameters )
 {
     ( void ) pvParameters;
@@ -470,7 +577,11 @@ static void prvVisionTask( void * pvParameters )
         }
 
         prvPost( REPORT_JOB_START, xReq.shot, ( uint8_t ) ( ampCore1Running() && !xCore1Lost ) );
-        if( xReq.scan )
+        if( xReq.scan && ( xReq.sw & SW_GAME ) )
+        {
+            prvGameTurn( &xReq );
+        }
+        else if( xReq.scan )
         {
             prvScan( &xReq );
         }
@@ -484,7 +595,7 @@ static void prvVisionTask( void * pvParameters )
             xQueueSend( xReports, &xMsg, portMAX_DELAY );
         }
 
-        /* Hold the next job until Report is done: its PGM dump / camera
+        /* Hold the next job until Report is done: its picture copy / camera
          * diagnostics read the FPGA from CPU0, and it reads the result block. */
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
         xJobInFlight = 0;
@@ -524,8 +635,8 @@ static void prvPrintHelp( void )
             "    g3 / g4 / g5  new face-down game (round 3): teams alternate\n"
             "    a1 .. e5      the cell the next guided read goes to (column letter, row number)\n"
             "    r             start this board again\n"
-            "  KEY1 tap undoes the last guided read, hold %u ms for a new board.\n",
-            xAutoScan ? "scan" : "one card", ORIENTS[ uOrientIdx ].name, ( unsigned ) KEY1_CLEAR_MS );
+            "  KEY1 tap undoes the last scan (or guided read), hold %u ms for a new board.\n",
+            xAutoScan ? "scan" : "one card", ORIENTS[ prvOrient() ].name, ( unsigned ) KEY1_CLEAR_MS );
 }
 
 /* The scan's pairs, grouped by rank in reading order: "7: 7H (1,1) + 7D (2,2)".
@@ -569,6 +680,80 @@ static void prvPrintPairs( void )
     printf( "  %u pair%s found\n\n", pairs, pairs == 1u ? "" : "s" );
 }
 
+/* The face-down game's answer to one KEY0 (prvGameTurn), on HDMI and the UART:
+ * the board set up, the turn judged, or what was wrong with the snapshot. */
+static void prvGameReport( const struct report_msg * pxMsg )
+{
+    char     msg[ 28 ];
+    unsigned i, ups = 0, n = xScan.nrows > xScan.ncols ? xScan.nrows : xScan.ncols;
+
+    if( pxMsg->kind == REPORT_GAME_BOARD )
+    {
+        for( i = 0; i < xScan.n; i++ ) ups += xScan.card[ i ].up;
+        if( xScan.nrows != xScan.ncols || n < 3 || n > GRID_MAX || xScan.n != n * n )
+        {
+            snprintf( msg, sizeof msg, "SAW %lux%lu, %lu CARDS", ( unsigned long ) xScan.nrows,
+                      ( unsigned long ) xScan.ncols, ( unsigned long ) xScan.n );
+        }
+        else if( ups )
+        {
+            snprintf( msg, sizeof msg, "%u UP - TURN ALL DOWN", ups );
+        }
+        else
+        {
+            gui_game_begin( ( int ) n );
+            uGameN        = n;
+            ulGameMatched = 0;
+            printf( "\n[%3lu] face-down game %ux%u set up: turn 2 cards up, KEY0\n",
+                    ( unsigned long ) pxMsg->shot, n, n );
+            return;
+        }
+        gui_game_note( msg );
+        printf( "\n[%3lu] face-down game: %s -- need a full 3x3, 4x4 or 5x5, all face down\n",
+                ( unsigned long ) pxMsg->shot, msg );
+        return;
+    }
+    if( pxMsg->kind == REPORT_GAME_NOTE )
+    {
+        if( pxMsg->idx == GAME_BAD_GRID )
+            snprintf( msg, sizeof msg, "SAW %lu CARDS, NOT %ux%u", ( unsigned long ) pxMsg->aux, uGameN, uGameN );
+        else
+            snprintf( msg, sizeof msg, "SHOW 2 CARDS - SAW %lu", ( unsigned long ) pxMsg->aux );
+        gui_game_note( msg );
+        printf( "\n[%3lu] game: %s\n", ( unsigned long ) pxMsg->shot, msg );
+        return;
+    }
+    {                                               /* REPORT_GAME_TURN */
+        const struct scan_card * a = &xScan.card[ pxMsg->idx ], * b = &xScan.card[ pxMsg->aux ];
+        uint32_t                 wa = xScanWord[ pxMsg->idx ], wb = xScanWord[ pxMsg->aux ];
+        int                      out = gui_game_turn( a->row, a->col, wa, b->row, b->col, wb, pxMsg->shot );
+
+        ulGameMatched = gui_game_matched();
+        printf( "\n[%3lu] game turn: (%u,%u) ", ( unsigned long ) pxMsg->shot, a->row, a->col );
+        if( prvIdentity( wa ) == 0xFFu ) printf( "no read" ); else print_result_name( wa );
+        printf( " + (%u,%u) ", b->row, b->col );
+        if( prvIdentity( wb ) == 0xFFu ) printf( "no read" ); else print_result_name( wb );
+        printf( "  -> %s\n", out == OUT_MATCH ? "PAIR" : out == OUT_NO_MATCH ? "NOT A PAIR, turn them back"
+                                                  : "refused: not face-down cells" );
+    }
+}
+
+/* SW1: keep the frame and the reads in DDR for Arm DS to save (pics.h) -- a
+ * 1-2 s copy, where the UART dump took 70 s and needed the cable. Red once the
+ * ring has wrapped: the oldest picture is gone, save the ring sooner. */
+static void prvSavePicture( const struct scan_result * pxScan, const uint32_t * pulWords )
+{
+    char     msg[ 28 ];
+    unsigned n;
+
+    gui_status( "SAVING PICTURE", GUI_YELLOW );
+    n = pic_store( pxScan, pulWords );
+    snprintf( msg, sizeof msg, n > PIC_SLOTS ? "PIC %u: OLDEST LOST" : "PIC %u SAVED", n );
+    gui_status( msg, n > PIC_SLOTS ? GUI_LRED : GUI_LGREEN );
+    printf( "  picture %u kept in memory for Arm DS (slot %u of %u, pics.h)\n\n",
+            n, ( n - 1u ) % PIC_SLOTS + 1u, ( unsigned ) PIC_SLOTS );
+}
+
 static void prvReportTask( void * pvParameters )
 {
     uint32_t ulResults = 0;
@@ -604,16 +789,38 @@ static void prvReportTask( void * pvParameters )
         if( xMsg.kind == REPORT_UNDO )
         {
             gui_undo();
+            uGameN        = ( unsigned ) gui_game_n();      /* the game as the board now shows it */
+            ulGameMatched = gui_game_matched();
             continue;
         }
-        if( xMsg.kind == REPORT_GRID )
+        if( xMsg.kind == REPORT_GAME_SW )           /* SW2: every time it goes up, a new game */
         {
-            gui_guide_grid( xMsg.shot != 0 );
+            uGameN        = 0;
+            ulGameMatched = 0;
+            if( xMsg.shot ) gui_game_note( "GAME: ALL FACE DOWN, KEY0" );
+            else            gui_status( "READY", GUI_LGREEN );
+            continue;
+        }
+        if( xMsg.kind == REPORT_GAME_BOARD || xMsg.kind == REPORT_GAME_TURN || xMsg.kind == REPORT_GAME_NOTE )
+        {
+            prvGameReport( &xMsg );
+            if( xMsg.sw & SW_PGM )                  /* the snapshot too, e.g. to check the backs */
+            {
+                prvSavePicture( &xScan, xScanWord );
+            }
+            xTaskNotifyGive( xVisionTask );
+            continue;
+        }
+        if( xMsg.kind == REPORT_TURN )              /* SW0: the hint names the orientation */
+        {
+            gui_mode( xAutoScan, ORIENTS[ xMsg.shot ? ORIENT_TURNED : uOrientIdx ].name );
             continue;
         }
         if( xMsg.kind == REPORT_CLEAR )
         {
-            gui_clear();
+            gui_clear();                            /* a game: all face down again, same board */
+            uGameN        = ( unsigned ) gui_game_n();
+            ulGameMatched = 0;
             continue;
         }
         if( xMsg.kind == REPORT_CMD )
@@ -623,14 +830,14 @@ static void prvReportTask( void * pvParameters )
             {
                 xAutoScan = !xAutoScan;
                 printf( "  KEY0 now %s\n", xAutoScan ? "SCANS THE WHOLE GRID" : "reads the card at the green box" );
-                gui_mode( xAutoScan, ORIENTS[ uOrientIdx ].name );
+                gui_mode( xAutoScan, ORIENTS[ prvOrient() ].name );
             }
             else if( ( xMsg.cmd[ 0 ] | 0x20 ) == 'o' && !xMsg.cmd[ 1 ] )
             {
                 uOrientIdx = ( uOrientIdx + 1u ) % N_ORIENTS;
-                printf( "  camera orientation: %s (row 1 = the top row as the professor sees it)\n",
-                        ORIENTS[ uOrientIdx ].name );
-                gui_mode( xAutoScan, ORIENTS[ uOrientIdx ].name );
+                printf( "  camera orientation: %s (row 1 = the top row as the professor sees it)%s\n",
+                        ORIENTS[ uOrientIdx ].name, ( read_switches() & SW_TURN ) ? " -- SW0 up overrides it" : "" );
+                gui_mode( xAutoScan, ORIENTS[ prvOrient() ].name );
             }
             else if( !gui_command( xMsg.cmd ) )
             {
@@ -646,7 +853,7 @@ static void prvReportTask( void * pvParameters )
                     ( unsigned long ) xScan.nrows, xScan.nrows == 1 ? "" : "s",
                     ( unsigned long ) xScan.ncols, xScan.ncols == 1 ? "" : "s",
                     ( unsigned long ) xScan.threshold, ( unsigned long ) ( xMsg.aux / 1000UL ),
-                    ORIENTS[ uOrientIdx ].name );
+                    ORIENTS[ uScanOrient ].name );
             continue;
         }
         if( xMsg.kind == REPORT_SCAN_CARD )
@@ -677,9 +884,7 @@ static void prvReportTask( void * pvParameters )
                 /* the frame the scan read, for sim_card_cnn.py -- the core is idle now */
                 if( xMsg.sw & SW_PGM )
                 {
-                    gui_status( "PGM DUMP (console)", GUI_YELLOW );
-                    dump_pgm();
-                    gui_scan_done();
+                    prvSavePicture( &xScan, xScanWord );
                 }
             }
             xTaskNotifyGive( xVisionTask );
@@ -691,25 +896,17 @@ static void prvReportTask( void * pvParameters )
         /* HDMI first: it takes milliseconds, the semihosted prints below far longer */
         gui_job_done( xMsg.shot, pxRes, !xMsg.auto_job, xMsg.on_core1 ? "CPU1" : "CPU0" );
 
-        if( ( xMsg.sw & SW_PREVIEW ) &&
-            ( pxRes->status == VIS_OK || pxRes->status == VIS_INFER_TIMEOUT ) )
-        {
-            print_preview( pxRes->art );
-        }
-
         print_vision_result( xMsg.shot, pxRes, xMsg.on_core1 ? "CPU1" : "CPU0" );
 
         /* only once the core is done: until then the image read port is conv1's */
         if( ( xMsg.sw & SW_PGM ) && pxRes->status == VIS_OK && !RES_DDR_ERR( pxRes->result ) )
         {
-            gui_status( "PGM DUMP (console)", GUI_YELLOW );
-            dump_pgm();
-            gui_status( "READY", GUI_LGREEN );
+            prvSavePicture( NULL, NULL );
         }
 
         ulResults++;
 #if STATS_EVERY
-        if( ( ulResults % STATS_EVERY ) == 0 )      /* SW2 is the guide grid now */
+        if( ( ulResults % STATS_EVERY ) == 0 )      /* SW2 is the face-down game now */
         {
             prvPrintStats();
         }
@@ -753,11 +950,11 @@ int rtos_main( void )
     /* The HDMI dashboard, drawn once here while nothing else runs; after the
      * scheduler starts only Report touches it. */
     gui_init();
-    gui_mode( xAutoScan, ORIENTS[ uOrientIdx ].name );
+    gui_mode( xAutoScan, ORIENTS[ prvOrient() ].name );
 
     /* Report's queue also carries the display-only messages (job start, KEY1
      * undo/clear), which are dropped rather than waited for when it is full --
-     * 8 leaves room for a burst of presses during a long PGM dump. */
+     * 8 leaves room for a burst of presses during a picture copy. */
     xJobs    = xQueueCreate( 1, sizeof( struct job_req ) );
     xReports = xQueueCreate( 8, sizeof( struct report_msg ) );
 
@@ -773,10 +970,15 @@ int rtos_main( void )
 
     printf( "  tasks: Input(p%d) -> Vision(p%d) -> Report(p%d)\n",
             INPUT_PRIO, VISION_PRIO, REPORT_PRIO );
-    printf( "grid mode -- the HDMI names the next cell: show that card at the green box\n"
-            "and press KEY0. Starts as a face-up 3x3 scan.\n"
-            "SW0 = ASCII preview, SW1 = PGM dump, SW2 = 3x3 guide grid in the green box,\n"
-            "SW3 = auto-capture every %u ms, shown but never placed (SW0+SW3 = ASCII viewfinder).\n",
+    printf( "%s", xAutoScan
+            ? "KEY0 scans the whole grid: every card inside the side lines (UART m: one card\n"
+              "at the green box instead).\n"
+            : "grid mode -- the HDMI names the next cell: show that card at the green box\n"
+              "and press KEY0. Starts as a face-up 3x3 scan.\n" );
+    printf( "SW0 = camera turned 90 deg clockwise (4x4: row 1 at the right of the preview),\n"
+            "SW1 = keep each picture in memory for Arm DS (pics.h), SW2 = face-down game\n"
+            "(KEY0 once all face down, then 2 cards up per KEY0), SW3 = auto-capture every\n"
+            "%u ms, shown but never placed.\n",
             ( unsigned ) AUTO_PERIOD_MS );
     prvPrintHelp();
     printf( "\n" );

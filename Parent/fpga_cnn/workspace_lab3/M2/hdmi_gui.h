@@ -54,10 +54,19 @@ void gui_scan_done( void );
 /* The hint under the camera: what KEY0 does now, and the camera orientation. */
 void gui_mode( int auto_scan, const char * orient_name );
 
-/* SW2: a 3x3 grid of thin green lines inside the green box, to line the cards
- * up. Drawn with the text layer's line glyphs over the live video, so it is on
- * HDMI only -- never in the camera frame the CNN reads. */
-void gui_guide_grid( int on );
+/* ---- face-down game, camera-driven (SW2, 30 Sep) ---------------------------
+ * gui_game_begin: a new one-player n x n game (the camera saw n x n, all face
+ * down). gui_game_turn: the two cards turned up, by the professor's (row, col),
+ * judged by grid.c; returns enum grid_outcome, OUT_NONE if a cell was not face
+ * down. gui_game_note: a problem with the snapshot, on the status line.
+ * gui_game_n: the game's n, 0 if the board is not a camera game (after an
+ * undo, say). gui_game_matched: matched cells as bits (row-1)*GRID_MAX+(col-1),
+ * which the camera then skips (found pairs stay face up). */
+void     gui_game_begin( int n );
+int      gui_game_turn( unsigned r1, unsigned c1, uint32_t w1, unsigned r2, unsigned c2, uint32_t w2, unsigned shot );
+void     gui_game_note( const char * msg );
+int      gui_game_n( void );
+uint32_t gui_game_matched( void );
 
 /* conv1's window registers (ghrd_top.v, img_wr_addr 0xE00 + n). They share
  * the text layer's bus, so like the text they are written from CPU0 only; the

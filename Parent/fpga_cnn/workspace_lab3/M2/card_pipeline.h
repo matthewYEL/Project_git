@@ -109,9 +109,9 @@ void print_camera_diag( void );
 
 /* dipsw_pio bits, read at the press */
 #define SW_PREVIEW      0x1u    /* SW0: print the 48x48 ASCII preview        */
-#define SW_PGM          0x2u    /* SW1: dump the full capture as a PGM       */
-#define SW_GRID         0x4u    /* SW2: 3x3 guide grid in the green box, to
-                                 * line cards up (RTOS build; HDMI only)     */
+#define SW_PGM          0x2u    /* SW1: keep the frame for sim_card_cnn.py -- in DDR for Arm DS (pics.h, RTOS app), as a UART PGM (RTOS_MODE 0) */
+#define SW_GAME         0x4u    /* SW2: the camera-based face-down game
+                                 * (RTOS build, app_rtos.c prvGameTurn)     */
 #define SW_AUTO         0x8u    /* SW3: capture automatically, no KEY needed
                                  * (RTOS build; every AUTO_PERIOD_MS)       */
 
@@ -134,7 +134,7 @@ struct scan_card
     uint16_t x0, y0, x1, y1;    /* frame px, inclusive */
     uint8_t  row, col;          /* the professor's (row, col), from 1 */
     uint8_t  red;               /* its index corners read red */
-    uint8_t  pad;
+    uint8_t  up;                /* face up (locate.c face_up) -- the face-down game */
 };
 
 struct scan_result

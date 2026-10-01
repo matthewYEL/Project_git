@@ -53,6 +53,7 @@ struct grid
     uint8_t  n_read;    /* scan: cells filled */
     uint8_t  pairs;     /* scan: pairs among them; game: pairs matched */
     uint8_t  team;      /* game: whose turn, 0 = A, 1 = B */
+    uint8_t  players;   /* game: 2 = teams A/B alternate (grid_new), 1 = one player */
     uint8_t  turn;      /* game: from 1 */
     uint8_t  score[ 2 ];
     int8_t   open[ 2 ]; /* game: the cells turned up this turn */

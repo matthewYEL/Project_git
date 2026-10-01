@@ -39,7 +39,7 @@ FREERTOS_PORT := $(FREERTOS)/portable/GCC/ARM_CA9
 # Basenames only: Makefile.inc turns each into $(OBJ_DIR)/<base>.o, so a path
 # here would ask for an object in a subdirectory that does not exist. The
 # directories go on VPATH below instead.
-APP_SRC       := atlas_main.c app_rtos.c a9_startup.c amp.c hdmi_gui.c grid.c locate.c uart_console.c
+APP_SRC       := atlas_main.c app_rtos.c a9_startup.c amp.c hdmi_gui.c grid.c locate.c uart_console.c pics.c
 FREERTOS_SRC  := tasks.c queue.c list.c timers.c port.c heap_4.c
 
 EXAMPLE_SRC := $(APP_SRC) $(FREERTOS_SRC)

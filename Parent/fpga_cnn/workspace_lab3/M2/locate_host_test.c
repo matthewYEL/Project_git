@@ -53,8 +53,8 @@ int main( int argc, char ** argv )
         struct win_regs w;
 
         window_for_card( c, orient, s_w, s_h, &w );
-        printf( "(%u,%u) %u %u %u %u red %u win %d %d %u %u clip %u %u %u %u\n",
-                c->row, c->col, c->x0, c->y0, c->x1, c->y1, c->red,
+        printf( "(%u,%u) %u %u %u %u red %u up %u win %d %d %u %u clip %u %u %u %u\n",
+                c->row, c->col, c->x0, c->y0, c->x1, c->y1, c->red, c->up,
                 w.x0, w.y0, w.step, w.flags, w.clip[ 0 ], w.clip[ 1 ], w.clip[ 2 ], w.clip[ 3 ] );
     }
     return 0;

@@ -19,6 +19,7 @@ void grid_new( struct grid * g, int n, int mode )
     g->target = mode == GRID_SCAN ? 0 : -1;     /* a scan starts at A1; a game waits for a cell */
     g->last   = -1;
     g->turn   = 1;
+    g->players = 2;
     g->open[ 0 ] = g->open[ 1 ] = -1;
     for( i = 0; i < g->n * g->n; i++ )
         g->cell[ i ].state = mode == GRID_SCAN ? CELL_EMPTY : CELL_DOWN;
@@ -111,7 +112,7 @@ int grid_read( struct grid * g, uint32_t result, unsigned shot )
     else
         g->outcome = OUT_NO_MATCH;
     g->turn++;
-    g->team ^= 1u;                      /* the spec: teams take alternate turns */
+    if( g->players == 2 ) g->team ^= 1u;    /* the spec: teams take alternate turns */
     return GRID_JUDGED;
 }
 

@@ -61,17 +61,30 @@ int _write(int fd, const void *buf, size_t len)
 }
 
 /* One received character, or -1 if none is waiting -- never blocks. The Input
- * task polls it for the operator's command lines; only it reads the RX side. */
+ * task polls it for the operator's command lines; only it reads the RX side.
+ *
+ * Characters that arrive with a framing, parity or break error are dropped: a
+ * dead or unplugged cable leaves the RX line floating or held low, and its
+ * noise must never add up to a command (30 Sep: the UART cable died, and the
+ * demo runs without one). The line status describes the character at the head
+ * of the FIFO, so it is read first. */
 int uart_getc(void)
 {
-    uint32_t level = 0;
+    uint32_t level = 0, status;
     char     c;
 
-    if (!uart0_ok || alt_16550_fifo_level_get_rx(&uart0, &level) != ALT_E_SUCCESS || level == 0)
+    if (!uart0_ok)
         return -1;
-    if (alt_16550_fifo_read(&uart0, &c, 1) != ALT_E_SUCCESS)
-        return -1;
-    return (unsigned char)c;
+    for (;;) {
+        if (alt_16550_fifo_level_get_rx(&uart0, &level) != ALT_E_SUCCESS || level == 0)
+            return -1;
+        if (alt_16550_line_status_get(&uart0, &status) != ALT_E_SUCCESS)
+            status = 0;
+        if (alt_16550_fifo_read(&uart0, &c, 1) != ALT_E_SUCCESS)
+            return -1;
+        if (!(status & (ALT_16550_LINE_STATUS_FE | ALT_16550_LINE_STATUS_PE | ALT_16550_LINE_STATUS_BI)))
+            return (unsigned char)c;
+    }
 }
 
 #else /* PRINTF_HOST: the console is the debugger's, which has no input here */

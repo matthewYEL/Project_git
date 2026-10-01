@@ -55,11 +55,17 @@
 
 /* Whole-grid scan (M2 demo, 29 Sep): UART m toggles whether KEY0 scans the
  * whole grid or reads one card at the green box, UART s scans whatever the
- * mode. SCAN_ORIENT_DEFAULT indexes app_rtos.c's ORIENTS[]: 0 upright camera,
- * 1 turned clockwise, 2 anticlockwise, 3 upside down -- set it from the rig
- * (UART o cycles it at run time). */
-#define SCAN_AUTO_DEFAULT       0
+ * mode. KEY0 scans the whole grid from power-up (since 30 Sep), so the demo
+ * needs no UART cable or PuTTY at all. SCAN_ORIENT_DEFAULT indexes
+ * app_rtos.c's ORIENTS[]: 0 upright camera, 1 turned clockwise, 2
+ * anticlockwise, 3 upside down -- set it from the rig (UART o cycles it at run
+ * time). */
+#define SCAN_AUTO_DEFAULT       1
 #define SCAN_ORIENT_DEFAULT     0
+
+/* SW1: pictures kept in DDR for Arm DS to save (pics.h), the newest this many;
+ * past it the oldest is overwritten. 512x384 x 2 bytes each, ~9.4 MB for 24. */
+#define PIC_SLOTS               24
 
 /* Reads per card in a grid scan (1, 3 or 5): each through a slightly different
  * window (turned, shifted, zoomed), majority vote. No time limit in the demo,

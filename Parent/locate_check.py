@@ -63,7 +63,7 @@ def python_lines(words, orient):
         n, area = locate.index_red(red, c)
         x0, y0, step, flags, clip = locate.window_params(c, FW, FH, orient=orient)
         lines.append(f'({c.row},{c.col}) {c.x0} {c.y0} {c.x1} {c.y1} red {int(n * locate.RED_PER > area)} '
-                     f'win {x0} {y0} {step} {flags} clip {clip[0]} {clip[1]} {clip[2]} {clip[3]}')
+                     f'up {int(c.up)} win {x0} {y0} {step} {flags} clip {clip[0]} {clip[1]} {clip[2]} {clip[3]}')
     return lines
 
 

@@ -28,6 +28,8 @@ Frame coordinates are the board's: (0, 0) is the top-left of the stored frame,
 x to the right. `orient` maps them onto the professor's (row, col): row 1 is
 the top row and column 1 the left, as the professor sees the table.
 """
+import math
+
 import numpy as np
 
 # Where the rank+suit index sits, as (u0, v0, u1, v1) percent of the card's short
@@ -39,6 +41,14 @@ import numpy as np
 # locate.c samples the identical points.
 INDEX_BOX_PCT = (4, 4, 18, 28)
 INDEX_NU, INDEX_NV = 12, 20
+# Face up or down (face_up): the white reference is a strip along the card's
+# long edge, the test area its middle, both as (u0, v0, u1, v1) percent like
+# INDEX_BOX_PCT; face up when >= UP_PCT % of the middle is within UP_DROP of the
+# strip's median. 30 Sep, 61-82 px: backs 5-14 %, faces 24-97 %.
+UP_BORDER_PCT = (1, 10, 4, 90)
+UP_CENTRE_PCT = (15, 12, 85, 88)
+UP_DROP = 30
+UP_PCT = 19
 RED_PER = 16          # red when red samples x RED_PER > samples, both corners together
                       # (6.25 %; 30 Sep, D8M + 729 photo cards: black <= 2.3 %, red >= 15 %)
 
@@ -61,13 +71,14 @@ FLAG_T, FLAG_FX, FLAG_FY = 1, 2, 4   # window FLAGS bits: transpose, flip x, fli
 
 
 class Card:
-    __slots__ = ('x0', 'y0', 'x1', 'y1', 'row', 'col', 'corners')
+    __slots__ = ('x0', 'y0', 'x1', 'y1', 'row', 'col', 'corners', 'up')
 
     def __init__(self, x0, y0, x1, y1, corners=None):
         self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
         self.row = self.col = 0
         # (top-left, top-right, bottom-left, bottom-right) card corners, frame px
         self.corners = corners or ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
+        self.up = True                      # face up; locate() tests it (face_up)
 
     w = property(lambda s: s.x1 - s.x0 + 1)
     h = property(lambda s: s.y1 - s.y0 + 1)
@@ -279,6 +290,8 @@ def locate(gray, step=STEP, orient=(False, False, False), info=None):
                  (bl[0] * step, min(H - 1, bl[1] * step + e)),
                  (min(W - 1, br[0] * step + e), min(H - 1, br[1] * step + e))))
            for x0, y0, x1, y1, (tl, tr, bl, br) in kept]
+    for c in out:
+        c.up = face_up(np.asarray(gray), c)
     assign_grid(out, orient)
     out.sort(key=lambda c: (c.row, c.col))
     if info is not None:
@@ -288,16 +301,30 @@ def locate(gray, step=STEP, orient=(False, False, False), info=None):
 
 
 def assign_grid(cards, orient=(False, False, False)):
-    """Set .row and .col (1-based) from the gaps between card centres."""
+    """Set .row and .col (1-based) from the gaps between card centres.
+
+    The centres are first turned by the grid's own direction -- the sum of the
+    cards' top edges, TR - TL -- so a grid held at a slant still falls into clean
+    rows and columns (30 Sep: a hand-held photo 9 deg off square read as 4x1
+    instead of 4x4). A straight grid comes out as before. Integer throughout, as
+    locate.c: doubled centres, the direction left unnormalised, and the gaps
+    scaled by isqrt(|d|^2) to match."""
     if not cards:
         return 0, 0
     swap, flip_r, flip_c = orient
-    ra = [c.cx if swap else c.cy for c in cards]         # position along the row axis
-    ca = [c.cy if swap else c.cx for c in cards]
+    dx = sum(c.corners[1][0] - c.corners[0][0] for c in cards)
+    dy = sum(c.corners[1][1] - c.corners[0][1] for c in cards)
+    if dx == 0 and dy == 0:
+        dx = 1
+    norm = math.isqrt(dx * dx + dy * dy)
+    tx = [(c.x0 + c.x1) * dx + (c.y0 + c.y1) * dy for c in cards]     # along the grid's x
+    ty = [(c.y0 + c.y1) * dx - (c.x0 + c.x1) * dy for c in cards]     # ... and its y
+    ra = tx if swap else ty                              # position along the row axis
+    ca = ty if swap else tx
     er = sorted(c.w if swap else c.h for c in cards)     # card extent along it
     ec = sorted(c.h if swap else c.w for c in cards)
-    ri, nr = _cluster(ra, er[len(er) // 2] / 2.0)       # ROW_GAP 0.5 x the extent
-    ci, nc = _cluster(ca, ec[len(ec) // 2] / 2.0)
+    ri, nr = _cluster(ra, er[len(er) // 2] * norm)      # ROW_GAP 0.5 x the extent (values doubled)
+    ci, nc = _cluster(ca, ec[len(ec) // 2] * norm)
     for c, r, k in zip(cards, ri, ci):
         c.row = (nr - r) if flip_r else r + 1
         c.col = (nc - k) if flip_c else k + 1
@@ -345,24 +372,48 @@ def index_samples(card):
     edges from that corner -- u along the short side, v along the long -- so it
     follows the card through tilt and perspective. Nearest pixel, in integers,
     exactly as locate.c's index_red()."""
-    U0, V0, U1, V1 = INDEX_BOX_PCT
-    nu, nv = INDEX_NU, INDEX_NV
     tl, tr, bl, br = card.corners
     # (corner, its neighbour along the short side, along the long side)
     patches = ((tr, br, tl), (bl, tl, br)) if card.landscape else ((tl, tr, bl), (br, bl, tr))
+    return [_patch(c, a, b, INDEX_BOX_PCT, INDEX_NU, INDEX_NV) for c, a, b in patches]
+
+
+def _patch(c, a, b, box, nu, nv):
+    """nu x nv points of the patch box = (u0, v0, u1, v1) percent laid from corner
+    c along the card's edges to a (u, the short side) and b (v, the long side).
+    Nearest pixel, in integers, exactly as locate.c's patch_point()."""
+    U0, V0, U1, V1 = box
     d = 100 * (nu - 1) * (nv - 1)
-    out = []
-    for c, a, b in patches:
-        pts = []
-        for i in range(nu):
-            fu = (U0 * (nu - 1) + (U1 - U0) * i) * (nv - 1)
-            for j in range(nv):
-                fv = (V0 * (nv - 1) + (V1 - V0) * j) * (nu - 1)
-                nx = fu * (a[0] - c[0]) + fv * (b[0] - c[0])
-                ny = fu * (a[1] - c[1]) + fv * (b[1] - c[1])
-                pts.append((c[0] + (2 * nx + d) // (2 * d), c[1] + (2 * ny + d) // (2 * d)))
-        out.append(pts)
-    return out
+    pts = []
+    for i in range(nu):
+        fu = (U0 * (nu - 1) + (U1 - U0) * i) * (nv - 1)
+        for j in range(nv):
+            fv = (V0 * (nv - 1) + (V1 - V0) * j) * (nu - 1)
+            nx = fu * (a[0] - c[0]) + fv * (b[0] - c[0])
+            ny = fu * (a[1] - c[1]) + fv * (b[1] - c[1])
+            pts.append((c[0] + (2 * nx + d) // (2 * d), c[1] + (2 * ny + d) // (2 * d)))
+    return pts
+
+
+def face_up(gray, card):
+    """Is the card face up? A face is mostly paper-white in the middle; the back
+    (a black Bicycle-style pattern inside a white border, 30 Sep photos) blurs
+    to grey at D8M sharpness. White is the card's own border, so dim light
+    doesn't matter: face up when >= UP_PCT % of the middle is within UP_DROP
+    grey levels of it. Measured at 61-82 px card widths: backs 5-14 %, faces
+    24-97 % (court cards the lowest)."""
+    tl, tr, bl, br = card.corners
+    c, a, b = (tr, br, tl) if card.landscape else (tl, tr, bl)
+    h, w = gray.shape
+    border = sorted(int(gray[y, x]) for x, y in _patch(c, a, b, UP_BORDER_PCT, 4, 16)
+                    if 0 <= x < w and 0 <= y < h)
+    centre = [int(gray[y, x]) for x, y in _patch(c, a, b, UP_CENTRE_PCT, 12, 16)
+              if 0 <= x < w and 0 <= y < h]
+    if not border or not centre:
+        return True
+    white = (border[(len(border) - 1) // 2] + border[len(border) // 2]) // 2
+    paper = sum(g >= white - UP_DROP for g in centre)
+    return paper * 100 >= UP_PCT * len(centre)
 
 
 def index_red(red, card):
