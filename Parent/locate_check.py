@@ -50,12 +50,12 @@ def rig_frame(bgr, rot):
     return out
 
 
-def python_lines(words, orient):
+def python_lines(words, orient, down=False):
     """locate.py's lines for a frame of board words ({gray, 0, red})."""
     gray = (words >> 2).astype(np.uint8)
     red = (words & 1).astype(bool)
     info = {}
-    cards = locate.locate(gray, orient=orient, info=info)
+    cards = locate.locate(gray, orient=orient, info=info, down=down)
     nr = max((c.row for c in cards), default=0)
     nc = max((c.col for c in cards), default=0)
     lines = [f'thr {info["threshold"]} n {len(cards)} rows {nr} cols {nc}']
@@ -84,6 +84,24 @@ def few_card_crops(bgr0):
             yield f'{label}, margin {pad}', bgr0[y0:y1 + 1, x0:x1 + 1], len(sel)
 
 
+def facedown_boards(spec):
+    """The SW2 game's boards (LOCATE_FACEDOWN): the 30 Sep photo of 16 backs as
+    is, and with two of them swapped for face crops from a 3x3 photo -- two
+    cards turned up -- each also at 0.45x light with sensor noise."""
+    backs = cv2.imread(os.path.join(HERE, 'facedown', 'multiple.jpeg'))
+    cards = sorted(locate.locate(S.fabric_luma(backs).astype(np.uint8)), key=lambda c: (c.row, c.col))
+    photo = cv2.imread(os.path.join(HERE, spec['dir'], 'WhatsApp Image 2026-09-28 at 20.40.56.jpeg'))
+    faces = [photo[c.y0:c.y1 + 1, c.x0:c.x1 + 1] for c in locate.locate(S.fabric_luma(photo).astype(np.uint8))]
+    two = backs.copy()
+    for c, f in ((cards[2], faces[1]), (cards[9], faces[7])):         # QC at (1,3), JS at (3,2)
+        two[c.y0:c.y1 + 1, c.x0:c.x1 + 1] = cv2.resize(f, (c.x1 - c.x0 + 1, c.y1 - c.y0 + 1),
+                                                     interpolation=cv2.INTER_AREA)
+    rng = np.random.default_rng(7)
+    for label, bgr in (('16 backs', backs), ('14 backs + QC JS up', two)):
+        yield label, bgr, None
+        yield label + ', dim', bgr, rng
+
+
 def main():
     exe = sys.argv[1] if len(sys.argv) > 1 else os.path.join(M2, 'locate_host_test.exe')
     spec = json.load(open(os.path.join(HERE, 'photos_3x3.json')))
@@ -101,7 +119,14 @@ def main():
         for oname, rot, orient, bits in ORIENTS:
             bgr = rig_frame(bgr0, rot)
             words = (S.fabric_luma(bgr).astype(np.uint16) << 2) | S.fabric_red(bgr).astype(np.uint16)
-            frames.append((tag, oname, words, orient, bits, n_want))
+            frames.append((tag, oname, words, orient, bits, n_want, False))
+    for tag, bgr0, rng in facedown_boards(spec):
+        for oname, rot, orient, bits in ORIENTS[:2]:          # the camera upright and turned
+            bgr = rig_frame(bgr0, rot)
+            if rng is not None:
+                bgr = np.clip(bgr.astype(np.float32) * 0.45 + rng.normal(0, 5, bgr.shape), 0, 255).astype(np.uint8)
+            words = (S.fabric_luma(bgr).astype(np.uint16) << 2) | S.fabric_red(bgr).astype(np.uint16)
+            frames.append((tag, oname, words, orient, bits | 8, None, True))   # 8 = LOCATE_FACEDOWN
     # the board's own SW1 frame dumps, if any: real D8M pixels, tilt and the
     # colour fringe included. No card count is asked of them -- cards cut by
     # the frame edge are rightly left out.
@@ -109,13 +134,13 @@ def main():
         for k, w, h, maxval, words in S._pgm_blocks(log):
             if maxval == 1023 and (w, h) == (FW, FH):
                 frames.append((f'{os.path.basename(log)} dump {k}', 'upright', words.astype(np.uint16),
-                               ORIENTS[0][2], ORIENTS[0][3], None))
-    for tag, oname, words, orient, bits, n_want in frames:
+                               ORIENTS[0][2], ORIENTS[0][3], None, False))
+    for tag, oname, words, orient, bits, n_want, down in frames:
         path = os.path.join(tmp, 'frame.bin')
         with open(path, 'wb') as f:
             f.write(np.array([FW, FH], '<u2').tobytes())
             f.write(words.astype('<u2').tobytes())
-        want = python_lines(words, orient)
+        want = python_lines(words, orient, down)
         got = subprocess.run([exe, path, str(bits)], capture_output=True, text=True).stdout.split('\n')
         got = [l for l in got if l.strip()]
         total += 1

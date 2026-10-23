@@ -501,6 +501,7 @@ VARIANTS = [(0, 0, 1000, 0),        # as is
             (-3, 0, 1000, 6),       # duplicates only: shifted x - 3 px, turned
             (0, 0, 950, 0)]         # duplicates only: zoomed in 5 %
 SCAN_READS = 5                      # app_config.h
+CLUB_MIN = 2                        # app_rtos.c: a black card is a club if 2 of its 7 reads say so
 
 
 def _ident(r):
@@ -538,6 +539,28 @@ def _vote(reads):
     return max((r for r in reads if _ident(r) == best), key=lambda r: r[2]), best_n
 
 
+def _club_look(gray, card, base, is_red, rs, chosen, agree):
+    """prvReadCard's second look at every black card: all the windows, then a
+    club if CLUB_MIN of the reads of its rank say so, else a spade. Clubs drift
+    to spades, never the other way (1 Oct, the photos at 4x4 sizes: all 160
+    spades read spade in all 7 windows; on the board clubs were missed even
+    when the first five all said spade). Returns (reads, chosen, agree)."""
+    if is_red or chosen[3]:
+        return rs, chosen, agree
+
+    def of(reads, suit):
+        return [r for r in reads if not r[3] and r[0] == chosen[0] and r[1] == suit]
+
+    if len(rs) < len(VARIANTS):
+        rs, _ = _read_variants(gray, card, base, is_red, len(VARIANTS))
+    pick = of(rs, 'Clubs')
+    if len(pick) < CLUB_MIN:
+        pick = of(rs, 'Spades')
+    if not pick:                                   # no spade read: the vote stands
+        return rs, chosen, agree
+    return rs, max(pick, key=lambda r: r[2]), len(pick)
+
+
 def read_cards(gray, red, orient=(False, False, False), reads=SCAN_READS):
     """The board's scan in software: locate the cards, then `reads` bit-exact
     CNN reads per card through window_map and the vote, then the duplicate
@@ -554,7 +577,8 @@ def read_cards(gray, red, orient=(False, False, False), reads=SCAN_READS):
         is_red = n * locate.RED_PER > area
         rs, win = _read_variants(gray, card, base, is_red, reads)
         chosen, agree = _vote(rs)
-        rows.append([card, chosen, n / area, win, is_red, reads, agree, rs[0], base])
+        rs, chosen, agree = _club_look(gray, card, base, is_red, rs, chosen, agree)
+        rows.append([card, chosen, n / area, win, is_red, len(rs), agree, rs[0], base])
     # one deck, so the same card twice is a misread: read both with every window
     for i in range(len(rows)):
         for j in range(i + 1, len(rows)):
@@ -565,7 +589,9 @@ def read_cards(gray, red, orient=(False, False, False), reads=SCAN_READS):
                 if rows[m][5] >= len(VARIANTS):
                     continue
                 rs, _ = _read_variants(gray, rows[m][0], rows[m][8], rows[m][4], len(VARIANTS))
-                rows[m][1], rows[m][6] = _vote(rs)
+                chosen, agree = _vote(rs)
+                _, rows[m][1], rows[m][6] = _club_look(gray, rows[m][0], rows[m][8], rows[m][4],
+                                                       rs, chosen, agree)
                 rows[m][5] = len(VARIANTS)
     return [tuple(r[:8]) for r in rows]
 

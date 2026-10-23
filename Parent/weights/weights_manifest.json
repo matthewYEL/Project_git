@@ -32,7 +32,7 @@
   },
   "hps_header": {
     "path": "../../LAB_5/fpga_cnn/workspace_lab3/M2/fcs_w_ddr.h",
-    "md5": "619f390497084b951d4a785652238aca"
+    "md5": "c8230841c66024fd3eadc391924dd268"
   },
   "written": "2026-09-27 21:40:09",
   "files": {
@@ -70,7 +70,7 @@
     },
     "fcs_w.hex": {
       "count": 147520,
-      "md5": "f46e5aab706425a81144f87fed1de0d2"
+      "md5": "5051a06f5b746973756c1cf6839c9460"
     },
     "fcs_b.hex": {
       "count": 64,
@@ -100,5 +100,11 @@
       "count": 2,
       "md5": "61a02bd0ec642b0c4c73587c3cc4e3ae"
     }
+  },
+  "fcs_w_finetune": {
+    "script": "finetune_fcs_blur.py",
+    "run": "runA.pt",
+    "written": "2026-10-02 02:10:09",
+    "note": "fc_shared.weight only, blur-augmented; every other file is checkpoint 16"
   }
 }

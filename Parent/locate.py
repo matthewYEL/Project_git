@@ -43,11 +43,14 @@ INDEX_BOX_PCT = (4, 4, 18, 28)
 INDEX_NU, INDEX_NV = 12, 20
 # Face up or down (face_up): the white reference is a strip along the card's
 # long edge, the test area its middle, both as (u0, v0, u1, v1) percent like
-# INDEX_BOX_PCT; face up when >= UP_PCT % of the middle is within UP_DROP of the
-# strip's median. 30 Sep, 61-82 px: backs 5-14 %, faces 24-97 %.
+# INDEX_BOX_PCT; face up when >= UP_PCT % of the middle is at least UP_WHITE %
+# of the strip's median. Relative, so dim light doesn't matter: a fixed drop of
+# 30 grey levels let the backs' pattern pass for paper once white fell to ~90
+# (1 Oct: backs up to 47 % at 0.45x light). Now, 51-90 px, 1x down to 0.3x
+# light: backs <= 14 %, faces >= 25 % (the D8M J-diamonds 23 %).
 UP_BORDER_PCT = (1, 10, 4, 90)
 UP_CENTRE_PCT = (15, 12, 85, 88)
-UP_DROP = 30
+UP_WHITE = 85
 UP_PCT = 19
 RED_PER = 16          # red when red samples x RED_PER > samples, both corners together
                       # (6.25 %; 30 Sep, D8M + 729 photo cards: black <= 2.3 %, red >= 15 %)
@@ -219,15 +222,57 @@ def _cluster(values, gap):
     return idx, g + 1
 
 
-def locate(gray, step=STEP, orient=(False, False, False), info=None):
+def _square(ra, ca, k, rgap, cgap):
+    """Row and column index of each card of a full k x k grid: sorted along the
+    row axis and cut into k rows of k, each row numbered along the column axis.
+    A hand-held camera at a slant bends the columns, which _cluster's fixed gap
+    can split or merge; the order along a row survives it. None unless every
+    cut is clean: each row starts more than rgap past the row before, and cards
+    in a row stand more than cgap apart (a card from the next row always brings
+    its column partner into the same row, so a mixed row fails this).
+
+    ponytail: full grids only -- with a card missed, _cluster still decides.
+    Upgrade: cut rows at the k-1 largest gaps, place short rows by the full ones."""
+    order = sorted(range(k * k), key=lambda i: ra[i])
+    if any(ra[order[r * k]] - ra[order[r * k - 1]] <= rgap for r in range(1, k)):
+        return None
+    ri, ci = [0] * (k * k), [0] * (k * k)
+    for r in range(k):
+        row = sorted(order[r * k:(r + 1) * k], key=lambda i: ca[i])
+        for j, i in enumerate(row):
+            if j and ca[i] - ca[row[j - 1]] <= cgap:
+                return None
+            ri[i], ci[i] = r, j
+    return ri, ci
+
+
+def _pct(hist, p):
+    """The first grey level by which p % of the samples are counted (integer,
+    as locate.c's pct())."""
+    total, run = int(sum(hist)), 0
+    for v, n in enumerate(hist):
+        run += int(n)
+        if run * 100 >= p * total:
+            return v
+    return len(hist) - 1
+
+
+def locate(gray, step=STEP, orient=(False, False, False), info=None, down=False):
     """Cards in a grey frame (H x W uint8), sorted by (row, col).
 
     orient = (swap, flip_rows, flip_cols): swap takes rows along frame x (the
     camera rotated 90 deg); the flips number rows/columns from the other end.
+    down: a mostly face-down board (the SW2 game, LOCATE_FACEDOWN). Little is
+    white there but the backs' thin borders, so Otsu could sink into their
+    pattern and the mat (1 Oct, a 4x4 at ~52 px: 1 to 17 cards found); the
+    threshold is kept at least halfway from the median to the 99th percentile.
     info, if a dict, receives the threshold and reject counts for debugging."""
     s = np.asarray(gray)[::step, ::step]
     sh, sw = s.shape
-    thr = otsu(np.bincount(s.ravel(), minlength=256))
+    hist = np.bincount(s.ravel(), minlength=256)
+    thr = otsu(hist)
+    if down:
+        thr = max(thr, (_pct(hist, 50) + _pct(hist, 99)) // 2)
     b = s > thr
 
     cand = []
@@ -308,7 +353,11 @@ def assign_grid(cards, orient=(False, False, False)):
     rows and columns (30 Sep: a hand-held photo 9 deg off square read as 4x1
     instead of 4x4). A straight grid comes out as before. Integer throughout, as
     locate.c: doubled centres, the direction left unnormalised, and the gaps
-    scaled by isqrt(|d|^2) to match."""
+    scaled by isqrt(|d|^2) to match.
+
+    9, 16 or 25 cards that the gaps don't sort into a clean k x k (a cell twice
+    counts as unclean) get _square's k rows of k instead, when its cuts are
+    clean (1 Oct: a hand-held 4x4 read "SAW 16 CARDS, NOT 4x4")."""
     if not cards:
         return 0, 0
     swap, flip_r, flip_c = orient
@@ -325,6 +374,12 @@ def assign_grid(cards, orient=(False, False, False)):
     ec = sorted(c.h if swap else c.w for c in cards)
     ri, nr = _cluster(ra, er[len(er) // 2] * norm)      # ROW_GAP 0.5 x the extent (values doubled)
     ci, nc = _cluster(ca, ec[len(ec) // 2] * norm)
+    n, side = len(cards), math.isqrt(len(cards))
+    if 3 <= side <= 5 and side * side == n and ((nr, nc) != (side, side) or len(set(zip(ri, ci))) < n):
+        # cuts: a quarter of the extent between rows, half of it between cards in a row
+        sq = _square(ra, ca, side, er[len(er) // 2] * norm // 2, ec[len(ec) // 2] * norm)
+        if sq:
+            (ri, ci), nr, nc = sq, side, side
     for c, r, k in zip(cards, ri, ci):
         c.row = (nr - r) if flip_r else r + 1
         c.col = (nc - k) if flip_c else k + 1
@@ -398,10 +453,9 @@ def _patch(c, a, b, box, nu, nv):
 def face_up(gray, card):
     """Is the card face up? A face is mostly paper-white in the middle; the back
     (a black Bicycle-style pattern inside a white border, 30 Sep photos) blurs
-    to grey at D8M sharpness. White is the card's own border, so dim light
-    doesn't matter: face up when >= UP_PCT % of the middle is within UP_DROP
-    grey levels of it. Measured at 61-82 px card widths: backs 5-14 %, faces
-    24-97 % (court cards the lowest)."""
+    to grey at D8M sharpness. White is the card's own border, and paper is any
+    sample at least UP_WHITE % of it, so dim light doesn't matter: face up when
+    >= UP_PCT % of the middle is paper (court cards are the lowest faces)."""
     tl, tr, bl, br = card.corners
     c, a, b = (tr, br, tl) if card.landscape else (tl, tr, bl)
     h, w = gray.shape
@@ -412,7 +466,7 @@ def face_up(gray, card):
     if not border or not centre:
         return True
     white = (border[(len(border) - 1) // 2] + border[len(border) // 2]) // 2
-    paper = sum(g >= white - UP_DROP for g in centre)
+    paper = sum(g * 100 >= white * UP_WHITE for g in centre)
     return paper * 100 >= UP_PCT * len(centre)
 
 

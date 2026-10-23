@@ -1,0 +1,62 @@
+#
+# Copyright Altera 2013
+# All Rights Reserved
+# File: semihost_setup.ds
+#
+
+#
+# Reset and stop the system.
+#
+stop
+wait 1s
+reset
+pause 3s
+stop
+wait 30s
+set var $Core::$R0 = 0
+
+#
+# Disable semihosting.
+#
+set semihosting enabled false
+
+#
+# Load the SPL preloader into memory.
+#
+loadfile "$sdir/u-boot-spl.axf" 0x0
+
+#
+# set pc to entry point
+#
+set debug-from *$entrypoint     # Set start-at setting to address of $entrypoint
+start 
+
+restore $sdir/u-boot-spl.dtb binary &__bss_end
+
+#
+# Enable semihosting.
+#
+set semihosting enabled true
+
+#
+# Delete any existing breakpoints.
+#
+delete
+
+#
+# Set a breakpoint in the SPL function spl_boot_device(). This function is
+# called right before the SPL tries to load the next stage in the preloader.
+#
+tbreak spl_boot_device
+
+#
+# Set the PC to the entry point and go.
+#
+run
+
+#
+# Wait for the breakpoint.
+#
+wait 5s
+finish
+
